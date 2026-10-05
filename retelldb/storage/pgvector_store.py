@@ -9,6 +9,11 @@ from retelldb.storage.base import BaseVectorStore
 from retelldb.storage.memory_store import MemoryVectorStore
 from retelldb.config import StorageConfig, default_config
 
+try:
+    from psycopg.types.json import Jsonb
+except ImportError:
+    Jsonb = None  # psycopg not installed — fallback path won't need it
+
 logger = logging.getLogger("retelldb.pgvector")
 
 
@@ -34,6 +39,8 @@ class PGVectorStore(BaseVectorStore):
             self._connected = False
 
     def _init_db(self):
+        # psycopg3 does not support multiple statements in a single execute call;
+        # split every DDL statement into its own cursor.execute.
         with self._conn.cursor() as cur:
             cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
             cur.execute(f"""
@@ -44,8 +51,11 @@ class PGVectorStore(BaseVectorStore):
                     embedding vector({self.config.embedding_dimension}),
                     metadata JSONB
                 );
-                CREATE INDEX IF NOT EXISTS idx_retell_graph ON retell_embeddings(graph_name);
             """)
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_retell_graph "
+                "ON retell_embeddings(graph_name);"
+            )
 
     def add_embedding(
         self, 
@@ -60,7 +70,9 @@ class PGVectorStore(BaseVectorStore):
 
         try:
             row_id = f"{graph_name}:{node_id}"
-            meta_json = json.dumps(metadata or {})
+            # Use psycopg Jsonb adapter so the driver knows to cast as JSONB;
+            # fall back to a plain json string if the import failed.
+            meta_val = Jsonb(metadata or {}) if Jsonb is not None else json.dumps(metadata or {})
             with self._conn.cursor() as cur:
                 cur.execute(
                     """
@@ -70,7 +82,7 @@ class PGVectorStore(BaseVectorStore):
                         embedding = EXCLUDED.embedding,
                         metadata = EXCLUDED.metadata;
                     """,
-                    (row_id, graph_name, node_id, embedding, meta_json)
+                    (row_id, graph_name, node_id, embedding, meta_val)
                 )
         except Exception as e:
             logger.error(f"pgvector add_embedding failed: {e}")
