@@ -166,6 +166,12 @@ flowchart TD
 
 ---
 
+## known issues & limitations
+
+- **tag traversal ranker / auth cluster overlap**: In the developer graph, multi-tag overlap weighting does not yet consistently outrank hop proximity for densely cross-linked documents (specifically the authentication cluster). High-signal queries can retrieve hop-1 neighbors (such as `Authentication Architecture`) ahead of specific sub-nodes when multiple matched tags connect to both. This is tracked as a round-3 item and does not block the >=70% hit-rate gate (currently 84.6% with 100% path and audience routing).
+
+---
+
 ## v2
 
 v2 adds a live call layer.
@@ -173,3 +179,4 @@ v2 adds a live call layer.
 you open a call, mumble something half-formed like "how do i... the auth thing... with the token refresh", and the agent infers your intent from the audio in real time and traverses the graph to find what you actually meant. no need to type a precise query.
 
 built on livekit and assemblyai.
+
