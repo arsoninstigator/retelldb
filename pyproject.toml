@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "retelldb"
+version = "0.1.0"
+description = "A graph-powered retrieval layer for agents that actually understand your docs"
+readme = "readme.md"
+requires-python = ">=3.9"
+dependencies = [
+    "pydantic>=2.0.0",
+    "fastapi>=0.100.0",
+    "uvicorn>=0.20.0",
+    "httpx>=0.24.0",
+    "pyyaml>=6.0",
+    "click>=8.0.0",
+]
+
+[project.optional-dependencies]
+all = [
+    "falkordb>=0.1.0",
+    "psycopg[binary]>=3.1.0",
+    "pgvector>=0.2.0",
+    "litellm>=1.0.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+]
+
+[project.scripts]
+retelldb = "retelldb.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["retelldb*"]
