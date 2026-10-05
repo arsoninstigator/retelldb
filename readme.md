@@ -168,7 +168,8 @@ flowchart TD
 
 ## known issues & limitations
 
-- **tag traversal ranker / auth cluster overlap**: In the developer graph, multi-tag overlap weighting does not yet consistently outrank hop proximity for densely cross-linked documents (specifically the authentication cluster). High-signal queries can retrieve hop-1 neighbors (such as `Authentication Architecture`) ahead of specific sub-nodes when multiple matched tags connect to both. This is tracked as a round-3 item and does not block the >=70% hit-rate gate (currently 84.6% with 100% path and audience routing).
+- **tag traversal ranker / auth cluster overlap**: In the developer graph, multi-tag overlap weighting does not yet consistently outrank hop proximity for densely cross-linked documents (specifically the authentication cluster). High-signal queries can retrieve hop-1 neighbors (such as `Authentication Architecture`) ahead of specific target sub-nodes when multiple matched tags connect to both. This produces three dev-graph misses (`dev_auth_token_refresh`, `dev_401_error`, `dev_ingest_example`), yielding an evaluation top-k hit rate of **76.9%** (10/13 queries passing) on both the `memory` and `falkordb` backends with 100.0% retrieval path and 100.0% audience routing accuracy (clearing the >=70% gate).
+- **traversal scoring equivalence**: Memory BFS and FalkorDB Cypher path traversal should be scoring-equivalent; right now hop accounting and tie-breaking details between live Cypher traversal and in-memory BFS require calibration in round 3.
 
 ---
 

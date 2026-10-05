@@ -17,7 +17,6 @@ queries:
     audience: developer
     expected_titles:
       - "Token Refresh Workflow"
-      - "Authentication Architecture"
     expected_retrieval_path: tag_traversal
     expected_audience_graph: dev_graph
 
