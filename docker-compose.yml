@@ -1,0 +1,26 @@
+services:
+  falkordb:
+    image: falkordb/falkordb:latest
+    container_name: retell-falkordb
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+
+  pgvector:
+    image: pgvector/pgvector:pg16
+    container_name: retell-pgvector
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: retelldb
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d retelldb"]
+      interval: 3s
+      timeout: 3s
+      retries: 5

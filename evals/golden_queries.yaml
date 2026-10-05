@@ -1,0 +1,128 @@
+# RetellDB Eval Golden Query Set
+# Each entry defines a query + what a correct retrieval result must contain.
+#
+# Fields:
+#   id              - unique query identifier
+#   query           - the natural-language query
+#   audience        - explicit audience hint (developer | user | null for auto-classify)
+#   expected_titles - at least one of these must appear in the top-k nodes
+#   expected_retrieval_path - tag_traversal | vector_fallback | hybrid
+#   expected_audience_graph - dev_graph | user_graph
+
+queries:
+  # ---- Developer graph: tag-signal queries (should fire tag_traversal) ----
+
+  - id: dev_auth_token_refresh
+    query: "How does token refresh work in the API?"
+    audience: developer
+    expected_titles:
+      - "Token Refresh Workflow"
+      - "Authentication Architecture"
+    expected_retrieval_path: tag_traversal
+    expected_audience_graph: dev_graph
+
+  - id: dev_auth_overview
+    query: "What authentication methods does RetellDB support?"
+    audience: developer
+    expected_titles:
+      - "Authentication Architecture"
+    expected_retrieval_path: tag_traversal
+    expected_audience_graph: dev_graph
+
+  - id: dev_401_error
+    query: "I'm getting a 401 unauthorized error on every API call"
+    audience: developer
+    expected_titles:
+      - "Common API Errors"
+    expected_retrieval_path: tag_traversal
+    expected_audience_graph: dev_graph
+
+  - id: dev_sdk_install
+    query: "How do I install and initialise the Python SDK?"
+    audience: developer
+    expected_titles:
+      - "SDK Quickstart"
+    expected_retrieval_path: tag_traversal
+    expected_audience_graph: dev_graph
+
+  - id: dev_rate_limit
+    query: "My requests are failing with 429 rate limit exceeded — how do I retry?"
+    audience: developer
+    expected_titles:
+      - "Common API Errors"
+    expected_retrieval_path: tag_traversal
+    expected_audience_graph: dev_graph
+
+  - id: dev_ingest_example
+    query: "Show me a code example for ingesting a markdown document via the SDK"
+    audience: developer
+    expected_titles:
+      - "SDK Quickstart"
+    expected_retrieval_path: tag_traversal
+    expected_audience_graph: dev_graph
+
+  # ---- User graph: tag-signal queries (should fire tag_traversal) ----
+
+  - id: user_getting_started
+    query: "How do I set up my workspace and upload my first documents?"
+    audience: user
+    expected_titles:
+      - "Getting Started"
+    expected_retrieval_path: tag_traversal
+    expected_audience_graph: user_graph
+
+  - id: user_billing_invoice
+    query: "How can I download my invoice?"
+    audience: user
+    expected_titles:
+      - "Managing Your Subscription"
+    expected_retrieval_path: tag_traversal
+    expected_audience_graph: user_graph
+
+  - id: user_cancel_subscription
+    query: "I want to cancel my subscription — will I lose my data?"
+    audience: user
+    expected_titles:
+      - "Managing Your Subscription"
+    expected_retrieval_path: tag_traversal
+    expected_audience_graph: user_graph
+
+  - id: user_upgrade_plan
+    query: "How do I upgrade from Free to the Pro plan?"
+    audience: user
+    expected_titles:
+      - "Managing Your Subscription"
+    expected_retrieval_path: tag_traversal
+    expected_audience_graph: user_graph
+
+  # ---- Auto-classify audience (no explicit hint) ----
+
+  - id: auto_dev_jwt
+    query: "how do I include a JWT bearer token in my request headers?"
+    audience: null
+    expected_titles:
+      - "Authentication Architecture"
+      - "Token Refresh Workflow"
+    expected_retrieval_path: tag_traversal
+    expected_audience_graph: dev_graph
+
+  - id: auto_user_billing
+    query: "how do I change my credit card?"
+    audience: null
+    expected_titles:
+      - "Managing Your Subscription"
+    expected_retrieval_path: tag_traversal
+    expected_audience_graph: user_graph
+
+  # ---- Vector fallback (vague queries with no graph tag signal) ----
+
+  - id: dev_vector_fallback_vague
+    query: "general overview of how the system works"
+    audience: developer
+    expected_titles:
+      - "Authentication Architecture"
+      - "SDK Quickstart"
+      - "Token Refresh Workflow"
+      - "Common API Errors"
+    expected_retrieval_path: vector_fallback
+    expected_audience_graph: dev_graph

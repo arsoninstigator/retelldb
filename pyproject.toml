@@ -34,3 +34,8 @@ retelldb = "retelldb.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["retelldb*"]
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: marks tests that require live Docker Compose backends",
+]
