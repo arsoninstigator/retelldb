@@ -14,6 +14,46 @@ from retelldb.config import StorageConfig, default_config
 logger = logging.getLogger("retelldb.falkordb")
 
 
+def _safe_node_type(raw: Any) -> NodeType:
+    """Convert a raw Cypher string property to NodeType with a safe fallback."""
+    try:
+        return NodeType(str(raw).lower())
+    except (ValueError, TypeError):
+        return NodeType.CONCEPT
+
+
+def _safe_audience(raw: Any) -> AudienceType:
+    """Convert a raw Cypher string property to AudienceType with a safe fallback."""
+    try:
+        return AudienceType(str(raw).lower())
+    except (ValueError, TypeError):
+        return AudienceType.DEVELOPER
+
+
+def _safe_tags(raw: Any) -> List[str]:
+    """Coerce the 'tags' property to a list of strings regardless of how FalkorDB returned it."""
+    if isinstance(raw, list):
+        return [str(t) for t in raw]
+    if isinstance(raw, str) and raw:
+        # FalkorDB may serialise a list as a string like "['auth', 'tokens']"
+        import ast
+        try:
+            parsed = ast.literal_eval(raw)
+            if isinstance(parsed, list):
+                return [str(t) for t in parsed]
+        except Exception:
+            pass
+        return [raw]
+    return []
+
+
+def _str_or_none(raw: Any) -> Optional[str]:
+    """Return a non-empty string or None."""
+    s = str(raw) if raw is not None else ""
+    return s if s else None
+
+
+
 class FalkorDBStore(BaseGraphStore):
     """Native FalkorDB backend adapter using Cypher property graph queries."""
 
@@ -89,12 +129,12 @@ class FalkorDBStore(BaseGraphStore):
                 return GraphNode(
                     id=props.get("id", node_id),
                     title=props.get("title", ""),
-                    type=NodeType(props.get("type", "concept")),
+                    type=_safe_node_type(props.get("type", "concept")),
                     content=props.get("content", ""),
-                    audience=AudienceType(props.get("audience", "developer")),
-                    tags=props.get("tags", []),
-                    source_uri=props.get("source_uri") or None,
-                    locator=props.get("locator") or None
+                    audience=_safe_audience(props.get("audience", "developer")),
+                    tags=_safe_tags(props.get("tags", [])),
+                    source_uri=_str_or_none(props.get("source_uri")),
+                    locator=_str_or_none(props.get("locator")),
                 )
         except Exception as e:
             logger.error(f"FalkorDB get_node failed: {e}")
@@ -107,20 +147,23 @@ class FalkorDBStore(BaseGraphStore):
         try:
             g = self._get_graph(graph_name)
             res = g.query(
-                "MATCH (s {id: $id})-[r]-(t) RETURN s.id, type(r), t.id, r", 
+                "MATCH (s {id: $id})-[r]-(t) RETURN s.id, type(r), t.id, r",
                 {"id": node_id}
             )
             edges = []
             for row in res.result_set:
                 s_id, r_type, t_id, r_obj = row
                 props = r_obj.properties
+                # r_obj.src_node / r_obj.dest_node are internal integer node IDs;
+                # use the Cypher-projected string property IDs (s_id, t_id) instead.
+                edge_id = props.get("id") or f"{s_id}-{r_type}-{t_id}"
                 edges.append(
                     GraphEdge(
-                        id=props.get("id") or f"{s_id}-{r_type}-{t_id}",
-                        source_id=props.get("source_id", s_id),
-                        target_id=props.get("target_id", t_id),
+                        id=edge_id,
+                        source_id=props.get("source_id") or str(s_id),
+                        target_id=props.get("target_id") or str(t_id),
                         type=EdgeType(r_type.lower()),
-                        weight=float(props.get("weight", 1.0))
+                        weight=float(props.get("weight", 1.0)),
                     )
                 )
             return edges
@@ -144,7 +187,7 @@ class FalkorDBStore(BaseGraphStore):
                         title=props.get("title", ""),
                         type=NodeType.TAG,
                         content=props.get("content", ""),
-                        tags=[props.get("title", "").lower()]
+                        tags=_safe_tags(props.get("tags", [])),
                     )
                 )
             return nodes
@@ -186,24 +229,30 @@ class FalkorDBStore(BaseGraphStore):
                                 GraphNode(
                                     id=nid,
                                     title=props.get("title", ""),
-                                    type=NodeType(props.get("type", "concept")),
+                                    type=_safe_node_type(props.get("type", "concept")),
                                     content=props.get("content", ""),
-                                    tags=props.get("tags", []),
-                                    source_uri=props.get("source_uri") or None,
-                                    locator=props.get("locator") or None
+                                    tags=_safe_tags(props.get("tags", [])),
+                                    source_uri=_str_or_none(props.get("source_uri")),
+                                    locator=_str_or_none(props.get("locator")),
                                 ),
                                 hop
                             )
                 for r in p_rels:
                     props = r.properties
-                    rid = props.get("id") or f"{r.src_node}-{r.relation}-{r.dest_node}"
+                    # r.src_node and r.dest_node may be integer internal IDs or Node objects;
+                    # extract the integer id safely for fallback edge ID construction.
+                    src_raw = r.src_node
+                    dst_raw = r.dest_node
+                    src_int = src_raw.id if hasattr(src_raw, "id") else src_raw
+                    dst_int = dst_raw.id if hasattr(dst_raw, "id") else dst_raw
+                    rid = props.get("id") or f"{src_int}-{r.relation}-{dst_int}"
                     if rid not in edge_map:
                         edge_map[rid] = GraphEdge(
                             id=rid,
-                            source_id=props.get("source_id", str(r.src_node)),
-                            target_id=props.get("target_id", str(r.dest_node)),
+                            source_id=props.get("source_id") or str(src_int),
+                            target_id=props.get("target_id") or str(dst_int),
                             type=EdgeType(r.relation.lower()),
-                            weight=float(props.get("weight", 1.0))
+                            weight=float(props.get("weight", 1.0)),
                         )
             return list(node_map.values()), list(edge_map.values())
         except Exception as e:
@@ -236,10 +285,10 @@ class FalkorDBStore(BaseGraphStore):
                 edges.append(
                     GraphEdge(
                         id=props.get("id") or f"{s_id}-{r_type}-{t_id}",
-                        source_id=s_id,
-                        target_id=t_id,
+                        source_id=props.get("source_id") or str(s_id),
+                        target_id=props.get("target_id") or str(t_id),
                         type=EdgeType(r_type.lower()),
-                        weight=float(props.get("weight", 1.0))
+                        weight=float(props.get("weight", 1.0)),
                     )
                 )
             return edges
@@ -266,11 +315,11 @@ class FalkorDBStore(BaseGraphStore):
                     GraphNode(
                         id=props.get("id"),
                         title=props.get("title", ""),
-                        type=NodeType(props.get("type", "concept")),
+                        type=_safe_node_type(props.get("type", "concept")),
                         content=props.get("content", ""),
-                        tags=props.get("tags", []),
-                        source_uri=props.get("source_uri"),
-                        locator=props.get("locator")
+                        tags=_safe_tags(props.get("tags", [])),
+                        source_uri=_str_or_none(props.get("source_uri")),
+                        locator=_str_or_none(props.get("locator")),
                     )
                 )
             return nodes
