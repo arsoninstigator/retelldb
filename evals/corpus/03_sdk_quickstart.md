@@ -1,6 +1,6 @@
 ---
 title: SDK Quickstart
-tags: [sdk, quickstart, python, setup]
+tags: [sdk, quickstart, python, setup, ingest, markdown]
 audience: developer
 ---
 

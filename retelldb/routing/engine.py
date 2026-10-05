@@ -70,32 +70,57 @@ class RetrievalEngine:
         strategy: QueryStrategy
 
         if has_signal:
-            # 3A. Semantic Tag Traversal on Graph Store
-            t_nodes, t_edges = self.graph_store.tag_traversal(
-                graph_name=target_graph,
-                tag_names=matched_tags,
-                max_hops=request.max_hops
-            )
-            traversal_edges = t_edges
+            # 3A. Semantic Tag Traversal — run per matched tag to track origin
+            # Accumulate per-node: best hop distance and set of originating tags
+            node_best_hop: Dict[str, int] = {}
+            node_tag_origins: Dict[str, Set[str]] = {}
+            node_ref: Dict[str, Any] = {}  # node_id -> GraphNode
 
-            # Filter out raw tag nodes and apply hop distance decay to scores
-            for item in t_nodes:
-                if isinstance(item, tuple):
-                    n, hop = item
-                else:
-                    n, hop = item, 1
+            for tag_name in matched_tags:
+                t_nodes, t_edges = self.graph_store.tag_traversal(
+                    graph_name=target_graph,
+                    tag_names=[tag_name],
+                    max_hops=request.max_hops
+                )
+                traversal_edges.extend(t_edges)
 
-                if n.type != NodeType.TAG:
-                    effective_hop = max(1, hop)
-                    decay = 0.85 ** (effective_hop - 1)
-                    score = round(min(0.98, tag_confidence * decay), 4)
-                    conf = round(tag_confidence * decay, 4)
-                    retrieved_nodes_map[n.id] = ScoredNode(
-                        node=n,
-                        score=score,
-                        confidence=conf,
-                        retrieval_source="tag_traversal"
-                    )
+                for item in t_nodes:
+                    if isinstance(item, tuple):
+                        n, hop = item
+                    else:
+                        n, hop = item, 1
+
+                    if n.type != NodeType.TAG:
+                        nid = n.id
+                        node_ref[nid] = n
+                        # Track best (minimum) hop from any tag
+                        if nid not in node_best_hop or hop < node_best_hop[nid]:
+                            node_best_hop[nid] = hop
+                        # Only count direct tag membership (hop 1) for the tag boost.
+                        # Nodes at hop 2+ are merely graph neighbors, not directly tagged.
+                        if hop <= 1:
+                            node_tag_origins.setdefault(nid, set()).add(tag_name)
+
+            # Deduplicate traversal edges
+            traversal_edges = list({e.id: e for e in traversal_edges}.values())
+
+            # Score nodes: weight by hop-distance decay AND number of matched tags
+            for nid, n in node_ref.items():
+                hop = node_best_hop[nid]
+                n_tags_matched = len(node_tag_origins.get(nid, set()))
+                effective_hop = max(1, hop)
+                decay = 0.85 ** (effective_hop - 1)
+                # Boost for multi-tag matches: each additional tag adds 0.10
+                tag_boost = 1.0 + 0.10 * (n_tags_matched - 1)
+                raw_score = tag_confidence * decay * tag_boost
+                score = round(min(0.98, raw_score), 4)
+                conf = round(tag_confidence * decay, 4)
+                retrieved_nodes_map[nid] = ScoredNode(
+                    node=n,
+                    score=score,
+                    confidence=conf,
+                    retrieval_source="tag_traversal"
+                )
 
             # 3B. Coverage Gap Check
             has_gaps = self._detect_coverage_gaps(

@@ -1,6 +1,6 @@
 ---
 title: Common API Errors
-tags: [errors, api, debugging, http]
+tags: [errors, api, debugging, http, 401, unauthorized, rate-limit]
 audience: developer
 ---
 

@@ -58,6 +58,7 @@ queries:
     audience: developer
     expected_titles:
       - "SDK Quickstart"
+      - "Ingesting a Document"
     expected_retrieval_path: tag_traversal
     expected_audience_graph: dev_graph
 
@@ -68,6 +69,7 @@ queries:
     audience: user
     expected_titles:
       - "Getting Started"
+      - "Getting Started with RetellDB"
     expected_retrieval_path: tag_traversal
     expected_audience_graph: user_graph
 
