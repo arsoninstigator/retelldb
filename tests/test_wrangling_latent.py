@@ -332,3 +332,130 @@ class TestEmbeddingLane:
         assert seen["headers"]["User-Agent"].startswith("Mozilla/5.0")
         assert len(vectors) == 2
         assert len(vectors[0]) == featherless.MODEL_DIMENSIONS[featherless.DEFAULT_MODEL]
+
+
+# ===========================================================================
+# CLI WIRING
+# ===========================================================================
+
+
+class TestAssociateCommand:
+    """The command embeds, proposes and stops. --apply is the only thing that writes edges."""
+
+    @staticmethod
+    def _fake_embedder(monkeypatch, table):
+        from retelldb.buildtime import featherless
+
+        class _Embedder:
+            name = "featherless:fake"
+
+            def __init__(self, model=None, **kwargs):
+                self.model = model
+
+            def embed(self, texts):
+                return [table[text] for text in texts]
+
+        monkeypatch.setattr(featherless, "FeatherlessEmbedder", _Embedder)
+
+    def _write_taxonomy(self, tmp_path):
+        path = tmp_path / "taxonomy.yaml"
+        path.write_text(
+            "tags:\n"
+            "- name: api\n"
+            "- name: sdk\n"
+            "- name: billing\n"
+            "- name: fiction\n"
+            "  excludes:\n"
+            "  - non fiction\n"
+            "- name: non fiction\n",
+            encoding="utf-8",
+        )
+        return path
+
+    def test_proposals_are_written_and_no_edge_is_applied(self, tmp_path, monkeypatch):
+        from click.testing import CliRunner
+        from retelldb.cli import main
+        from retelldb.wrangling.taxonomy import TagTaxonomy
+
+        self._fake_embedder(
+            monkeypatch,
+            {
+                "api": _vec(0),
+                "sdk": _vec(8),
+                "billing": _vec(85),
+                # the excluded pair is close only to itself, so it cannot ride in on a
+                # transitive similarity to api
+                "fiction": _vec(170),
+                "non fiction": _vec(171),
+            },
+        )
+        taxonomy_path = self._write_taxonomy(tmp_path)
+        before = taxonomy_path.read_text(encoding="utf-8")
+        out = tmp_path / "associations.yaml"
+
+        result = CliRunner().invoke(
+            main, ["taxonomy", "associate", str(taxonomy_path), "--out", str(out)]
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "1 proposals" in result.output
+        assert "blocked by an exclusion" in result.output
+        assert "median" in result.output
+        # proposals on disk, taxonomy untouched
+        assert "provenance:" in out.read_text(encoding="utf-8")
+        assert taxonomy_path.read_text(encoding="utf-8") == before
+        assert all(not tag.related for tag in TagTaxonomy.from_file(taxonomy_path).tags)
+
+    def test_apply_writes_symmetric_edges_and_keeps_the_exclusion_out(self, tmp_path, monkeypatch):
+        from click.testing import CliRunner
+        from retelldb.cli import main
+        from retelldb.wrangling.taxonomy import TagTaxonomy
+
+        self._fake_embedder(
+            monkeypatch,
+            {
+                "api": _vec(0),
+                "sdk": _vec(8),
+                "billing": _vec(85),
+                # the excluded pair is close only to itself, so it cannot ride in on a
+                # transitive similarity to api
+                "fiction": _vec(170),
+                "non fiction": _vec(171),
+            },
+        )
+        taxonomy_path = self._write_taxonomy(tmp_path)
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "taxonomy", "associate", str(taxonomy_path),
+                "--out", str(tmp_path / "associations.yaml"),
+                "--apply",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "Applied 1 associations" in result.output
+        loaded = TagTaxonomy.from_file(taxonomy_path)
+        by_name = {tag.name: tag for tag in loaded.tags}
+        assert by_name["api"].related["sdk"] == pytest.approx(0.990, abs=1e-2)
+        assert by_name["sdk"].related["api"] == pytest.approx(0.990, abs=1e-2)
+        assert by_name["fiction"].related == {}
+        assert by_name["non fiction"].related == {}
+
+    def test_a_missing_embedder_fails_loudly_instead_of_proposing_nothing(self, tmp_path, monkeypatch):
+        from click.testing import CliRunner
+        from retelldb.cli import main
+        from retelldb.buildtime import featherless
+
+        for name in featherless.API_KEY_ENV:
+            monkeypatch.delenv(name, raising=False)
+        taxonomy_path = self._write_taxonomy(tmp_path)
+
+        result = CliRunner().invoke(
+            main, ["taxonomy", "associate", str(taxonomy_path), "--out", str(tmp_path / "a.yaml")]
+        )
+
+        assert result.exit_code != 0
+        assert "no token-projection" in result.output
+        assert not (tmp_path / "a.yaml").exists()

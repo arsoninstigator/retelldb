@@ -1,5 +1,27 @@
 # changelog
 
+## 0.2.5
+
+### added
+
+- `retelldb taxonomy generate --associate` runs the latent pass as part of the same build and
+  writes `taxonomy.associations.yaml` beside the taxonomy. the two passes belong together: the
+  generator decides what the canonical tags are, the latent pass is the only one that can say
+  which of them sit near each other.
+- `taxonomy associate` and the chained pass now share one implementation, so the standalone
+  command and the build cannot drift.
+
+### tested
+
+- the command is covered end to end with a fake embedder: proposals land on disk, the taxonomy
+  file stays byte identical without `--apply`, `--apply` writes symmetric edges, an excluded
+  pair is never bridged, and a missing embedder fails loudly without writing a file.
+
+### verified
+
+- chained on the eval corpus: 46 raw tags -> 32 canonical tags, then 53 latent proposals at
+  median 0.566, in one command.
+
 ## 0.2.4
 
 ### added

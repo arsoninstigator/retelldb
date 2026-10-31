@@ -121,9 +121,15 @@ human can inspect. retelldb keeps that line. vector distance never creates an ed
 time, and one command does the job latent space is actually good at:
 
 ```bash
-retelldb taxonomy associate taxonomy.yaml --out associations.yaml   # review the proposals
+retelldb taxonomy generate docs/ --out taxonomy.yaml --associate     # generate, then propose
+retelldb taxonomy associate taxonomy.yaml --out associations.yaml   # bind: review the proposals
 retelldb taxonomy associate taxonomy.yaml --apply                   # accept them
 ```
+
+`--associate` exists because the two passes belong to one build: the generator decides what
+the canonical tags are, and the latent pass is the only thing that can say which of them sit
+near each other. chaining them writes `taxonomy.yaml` and `taxonomy.associations.yaml`
+together, and either pass can still be run alone.
 
 the run embeds each canonical tag as its name plus aliases (the words humans actually
 typed), compares every pair by cosine, and writes proposals with the raw similarity kept as
