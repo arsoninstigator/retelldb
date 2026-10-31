@@ -30,6 +30,24 @@ class BaseGraphStore(ABC):
         """Fetch all connected edges for a given node."""
         pass
 
+    def neighbors(
+        self,
+        graph_name: str,
+        node_id: str
+    ) -> List[Tuple[GraphEdge, str]]:
+        """
+        Return (edge, neighbour_id) pairs for one node.
+
+        Backends may override this with a native adjacency call. The default walks
+        the node's edges, which is enough for any backend that implements get_edges.
+        """
+        pairs: List[Tuple[GraphEdge, str]] = []
+        for edge in self.get_edges(graph_name, node_id):
+            other = edge.target_id if edge.source_id == node_id else edge.source_id
+            if other:
+                pairs.append((edge, other))
+        return pairs
+
     @abstractmethod
     def get_tag_nodes(self, graph_name: str) -> List[GraphNode]:
         """Retrieve all first-class semantic tag nodes in the graph."""

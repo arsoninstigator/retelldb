@@ -6,6 +6,10 @@ from enum import Enum
 from typing import Dict, List, Optional, Any
 from pydantic import BaseModel, Field
 from retelldb.models.schema import AudienceType, GraphNode, GraphEdge
+from retelldb.wrangling.citation import Citation
+from retelldb.wrangling.confidence import ConfidenceBreakdown
+from retelldb.wrangling.scope import ScopeBlock
+from retelldb.wrangling.taxonomy import TagResolution
 
 
 class QueryStrategy(str, Enum):
@@ -23,6 +27,15 @@ class QueryRequest(BaseModel):
     top_k: int = Field(default=5, ge=1, le=50)
     include_edges: bool = True
     tag_confidence_threshold: float = Field(default=0.6, ge=0.0, le=1.0)
+    # perspective: which persona this query runs as. None means no declared perspective,
+    # in which case persona-scoped content stays out of reach (fail-closed).
+    persona: Optional[str] = None
+    allow_shared: bool = True
+    # report what perspective hid and where the content came from
+    include_blocked: bool = True
+    include_citations: bool = True
+    # minimum edge weight for traversal; None uses the engine default
+    min_edge_weight: Optional[float] = Field(default=None, ge=0.0, le=1.0)
 
 
 class ScoredNode(BaseModel):
@@ -43,6 +56,16 @@ class SubGraphResult(BaseModel):
     traversal_chains: List[List[str]] = Field(default_factory=list)
     confidence_signals: Dict[str, float] = Field(default_factory=dict)
     execution_time_ms: float = 0.0
+    # tiered confidence plus the components that dampened it
+    confidence: Optional[ConfidenceBreakdown] = None
+    # weighted traversal traces: which path and which weights pulled each node in
+    paths: List[Dict[str, Any]] = Field(default_factory=list)
+    # tags the query resolved through, including aliases and their provenance
+    tag_resolutions: List[TagResolution] = Field(default_factory=list)
+    # nodes withheld by the active perspective, with reasons
+    blocked: List[ScopeBlock] = Field(default_factory=list)
+    # where the retrieved content actually came from
+    citations: List[Citation] = Field(default_factory=list)
 
 
 class QueryResponse(BaseModel):
@@ -69,6 +92,9 @@ class IngestRequest(BaseModel):
     title: Optional[str] = None
     source_uri: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    # perspective stamps: who may retrieve this content afterwards
+    personas: List[str] = Field(default_factory=list)
+    sensitivity: str = "shared"
 
 
 class IngestResponse(BaseModel):
@@ -79,6 +105,10 @@ class IngestResponse(BaseModel):
     tags_created: int
     graph: str
     execution_time_ms: float
+    # raw tags that resolved through a configured alias
+    aliases_created: int = 0
+    # raw tags that matched more than one canonical tag and were left alone
+    ambiguous_tags: List[str] = Field(default_factory=list)
 
 
 class GraphStatusResponse(BaseModel):

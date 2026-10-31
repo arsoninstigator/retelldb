@@ -2,6 +2,8 @@
 Schema definitions for RetellDB: node types, edge types, and graph representations.
 """
 
+import ast
+import json
 from enum import Enum
 from typing import Dict, List, Optional, Any
 from pydantic import BaseModel, Field
@@ -52,12 +54,54 @@ class EdgeType(str, Enum):
     RELATED = "related"
     TAGGED_AS = "tagged_as"
     EXAMPLE_OF = "example_of"
+    # tag wrangling
+    ALIAS_OF = "alias_of"    # alias tag -> the canonical tag it resolves to
+    PARENT_OF = "parent_of"  # child tag -> the broader tag that contains it
+    # a negative association: traversal never walks through this edge
+    BLOCKS = "blocks"
 
 
 class AudienceType(str, Enum):
     """Target audience graph namespace."""
     DEVELOPER = "developer"
     USER = "user"
+
+
+class SourceRef(BaseModel):
+    """
+    Where a node actually came from: a file, a line range inside it, and what kind
+    of content sits there. This is what makes a citation checkable instead of
+    decorative.
+    """
+    uri: Optional[str] = None
+    path: Optional[str] = None
+    line_start: Optional[int] = None
+    line_end: Optional[int] = None
+    content_type: str = "text"
+    excerpt: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "uri": self.uri,
+            "path": self.path,
+            "line_start": self.line_start,
+            "line_end": self.line_end,
+            "content_type": self.content_type,
+            "excerpt": self.excerpt,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Any) -> "SourceRef":
+        if not isinstance(data, dict):
+            return cls()
+        return cls(
+            uri=data.get("uri"),
+            path=data.get("path"),
+            line_start=data.get("line_start"),
+            line_end=data.get("line_end"),
+            content_type=data.get("content_type") or "text",
+            excerpt=data.get("excerpt"),
+        )
 
 
 class GraphNode(BaseModel):
@@ -72,6 +116,12 @@ class GraphNode(BaseModel):
     locator: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
     embedding: Optional[List[float]] = None
+    # where this node lives in the source material (path, line range, content type)
+    sources: List[SourceRef] = Field(default_factory=list)
+    # perspectives that may read this node; empty means shared/unscoped
+    personas: List[str] = Field(default_factory=list)
+    # "shared" or "private": private nodes are only visible to their personas
+    sensitivity: str = "shared"
 
     def to_cypher_props(self, max_content_length: Optional[int] = None) -> Dict[str, Any]:
         """Convert node properties to a dictionary safe for Cypher insertion."""
@@ -88,11 +138,65 @@ class GraphNode(BaseModel):
             "tags": self.tags,
             "source_uri": self.source_uri or "",
             "locator": self.locator or "",
+            "personas": list(self.personas),
+            "sensitivity": self.sensitivity or "shared",
+            "sources_json": json.dumps([s.to_dict() for s in self.sources]),
         }
         for k, v in self.metadata.items():
             if isinstance(v, (str, int, float, bool)):
                 props[f"meta_{k}"] = v
         return props
+
+    @staticmethod
+    def _coerce_list(raw: Any) -> List[str]:
+        """Coerce a Cypher property that should be a list of strings."""
+        if isinstance(raw, list):
+            return [str(v) for v in raw]
+        if isinstance(raw, str) and raw.strip():
+            try:
+                parsed = ast.literal_eval(raw)
+                if isinstance(parsed, (list, tuple)):
+                    return [str(v) for v in parsed]
+            except (ValueError, SyntaxError):
+                pass
+            return [raw]
+        return []
+
+    @classmethod
+    def from_cypher_props(cls, props: Dict[str, Any]) -> "GraphNode":
+        """Rebuild a node from raw backend properties, tolerating backend quirks."""
+        raw_sources = props.get("sources_json")
+        sources: List[SourceRef] = []
+        if isinstance(raw_sources, str) and raw_sources.strip():
+            try:
+                parsed = json.loads(raw_sources)
+                if isinstance(parsed, list):
+                    sources = [SourceRef.from_dict(item) for item in parsed]
+            except (ValueError, TypeError):
+                sources = []
+
+        try:
+            node_type = NodeType(str(props.get("type", "concept")).lower())
+        except ValueError:
+            node_type = NodeType.CONCEPT
+        try:
+            audience = AudienceType(str(props.get("audience", "developer")).lower())
+        except ValueError:
+            audience = AudienceType.DEVELOPER
+
+        return cls(
+            id=props.get("id") or "",
+            title=props.get("title", ""),
+            type=node_type,
+            content=props.get("content", ""),
+            audience=audience,
+            tags=cls._coerce_list(props.get("tags", [])),
+            source_uri=props.get("source_uri") or None,
+            locator=props.get("locator") or None,
+            sources=sources,
+            personas=cls._coerce_list(props.get("personas", [])),
+            sensitivity=props.get("sensitivity") or "shared",
+        )
 
 
 class GraphEdge(BaseModel):
@@ -116,3 +220,54 @@ class GraphEdge(BaseModel):
             if isinstance(v, (str, int, float, bool)):
                 props[f"meta_{k}"] = v
         return props
+
+    @staticmethod
+    def _coerce_list(raw: Any) -> List[str]:
+        """Coerce a Cypher property that should be a list of strings."""
+        if isinstance(raw, list):
+            return [str(v) for v in raw]
+        if isinstance(raw, str) and raw.strip():
+            try:
+                parsed = ast.literal_eval(raw)
+                if isinstance(parsed, (list, tuple)):
+                    return [str(v) for v in parsed]
+            except (ValueError, SyntaxError):
+                pass
+            return [raw]
+        return []
+
+    @classmethod
+    def from_cypher_props(cls, props: Dict[str, Any]) -> "GraphNode":
+        """Rebuild a node from raw backend properties, tolerating backend quirks."""
+        raw_sources = props.get("sources_json")
+        sources: List[SourceRef] = []
+        if isinstance(raw_sources, str) and raw_sources.strip():
+            try:
+                parsed = json.loads(raw_sources)
+                if isinstance(parsed, list):
+                    sources = [SourceRef.from_dict(item) for item in parsed]
+            except (ValueError, TypeError):
+                sources = []
+
+        try:
+            node_type = NodeType(str(props.get("type", "concept")).lower())
+        except ValueError:
+            node_type = NodeType.CONCEPT
+        try:
+            audience = AudienceType(str(props.get("audience", "developer")).lower())
+        except ValueError:
+            audience = AudienceType.DEVELOPER
+
+        return cls(
+            id=props.get("id") or "",
+            title=props.get("title", ""),
+            type=node_type,
+            content=props.get("content", ""),
+            audience=audience,
+            tags=cls._coerce_list(props.get("tags", [])),
+            source_uri=props.get("source_uri") or None,
+            locator=props.get("locator") or None,
+            sources=sources,
+            personas=cls._coerce_list(props.get("personas", [])),
+            sensitivity=props.get("sensitivity") or "shared",
+        )

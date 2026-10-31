@@ -3,7 +3,7 @@ RetellDB Client SDK.
 Supports both embedded in-process execution and remote HTTP hosted API communication.
 """
 
-from typing import Optional, Dict, Any, Union
+from typing import Any, Dict, List, Optional, Union
 import httpx
 from retelldb.models.schema import AudienceType
 from retelldb.models.query import (
@@ -21,6 +21,8 @@ from retelldb.storage.falkordb_store import FalkorDBStore
 from retelldb.storage.pgvector_store import PGVectorStore
 from retelldb.ingestion.pipeline import IngestionPipeline
 from retelldb.routing.engine import RetrievalEngine
+from retelldb.wrangling.citation import SourceVerifier
+from retelldb.wrangling.taxonomy import TagTaxonomy
 
 
 class RetellDB:
@@ -30,10 +32,14 @@ class RetellDB:
         self,
         base_url: Optional[str] = None,
         config: Optional[RetellDBConfig] = None,
-        use_memory: bool = False
+        use_memory: bool = False,
+        taxonomy: Optional["TagTaxonomy"] = None,
+        source_verifier: Optional["SourceVerifier"] = None,
     ):
         self.base_url = base_url.rstrip("/") if base_url else None
         self.config = config or default_config
+        self.taxonomy = taxonomy
+        self.source_verifier = source_verifier
 
         if self.base_url:
             self._http_client = httpx.Client(base_url=self.base_url, timeout=30.0)
@@ -48,8 +54,19 @@ class RetellDB:
                 self.graph_store = FalkorDBStore(self.config.storage)
                 self.vector_store = PGVectorStore(self.config.storage)
 
-            self.pipeline = IngestionPipeline(self.graph_store, self.vector_store, self.config)
-            self.engine = RetrievalEngine(self.graph_store, self.vector_store, self.config)
+            self.pipeline = IngestionPipeline(
+                self.graph_store,
+                self.vector_store,
+                self.config,
+                taxonomy=self.taxonomy,
+            )
+            self.engine = RetrievalEngine(
+                self.graph_store,
+                self.vector_store,
+                self.config,
+                taxonomy=self.taxonomy,
+                source_verifier=self.source_verifier,
+            )
 
     def query(
         self,
@@ -57,7 +74,13 @@ class RetellDB:
         audience: Optional[Union[str, AudienceType]] = None,
         max_hops: int = 3,
         top_k: int = 5,
-        include_edges: bool = True
+        include_edges: bool = True,
+        persona: Optional[str] = None,
+        allow_shared: bool = True,
+        tag_confidence_threshold: float = 0.6,
+        min_edge_weight: Optional[float] = None,
+        include_blocked: bool = True,
+        include_citations: bool = True,
     ) -> SubGraphResult:
         """Query documentation graphs via routing layer."""
         aud_enum = AudienceType(audience) if isinstance(audience, str) else audience
@@ -66,7 +89,13 @@ class RetellDB:
             audience=aud_enum,
             max_hops=max_hops,
             top_k=top_k,
-            include_edges=include_edges
+            include_edges=include_edges,
+            persona=persona,
+            allow_shared=allow_shared,
+            tag_confidence_threshold=tag_confidence_threshold,
+            min_edge_weight=min_edge_weight,
+            include_blocked=include_blocked,
+            include_citations=include_citations,
         )
 
         if not self._embedded:
@@ -84,7 +113,9 @@ class RetellDB:
         audience: Union[str, AudienceType] = "developer",
         title: Optional[str] = None,
         source_uri: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        personas: Optional[List[str]] = None,
+        sensitivity: str = "shared",
     ) -> IngestResponse:
         """Ingest document content into the property graph and vector stores."""
         fmt_enum = IngestDocumentFormat(format) if isinstance(format, str) else format
@@ -96,7 +127,9 @@ class RetellDB:
             audience=aud_enum,
             title=title,
             source_uri=source_uri,
-            metadata=metadata or {}
+            metadata=metadata or {},
+            personas=personas or [],
+            sensitivity=sensitivity,
         )
 
         if not self._embedded:
@@ -110,7 +143,9 @@ class RetellDB:
             audience=req.audience,
             title=req.title,
             source_uri=req.source_uri,
-            metadata=req.metadata
+            metadata=req.metadata,
+            personas=req.personas,
+            sensitivity=req.sensitivity,
         )
 
     def status(self) -> GraphStatusResponse:

@@ -51,6 +51,20 @@ class MemoryGraphStore(BaseGraphStore):
         in_edges = g["in_adj"].get(node_id, [])
         return list({e.id: e for e in out_edges + in_edges}.values())
 
+    def neighbors(
+        self,
+        graph_name: str,
+        node_id: str
+    ) -> List[Tuple[GraphEdge, str]]:
+        """Native adjacency lookup for weighted traversal."""
+        g = self._ensure_graph(graph_name)
+        pairs: List[Tuple[GraphEdge, str]] = []
+        for edge in g["out_adj"].get(node_id, []):
+            pairs.append((edge, edge.target_id))
+        for edge in g["in_adj"].get(node_id, []):
+            pairs.append((edge, edge.source_id))
+        return pairs
+
     def get_tag_nodes(self, graph_name: str) -> List[GraphNode]:
         g = self._ensure_graph(graph_name)
         return [n for n in g["nodes"].values() if n.type == NodeType.TAG]

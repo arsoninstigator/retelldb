@@ -125,17 +125,7 @@ class FalkorDBStore(BaseGraphStore):
             res = g.query("MATCH (n {id: $id}) RETURN n", {"id": node_id})
             if res.result_set:
                 raw_node = res.result_set[0][0]
-                props = raw_node.properties
-                return GraphNode(
-                    id=props.get("id", node_id),
-                    title=props.get("title", ""),
-                    type=_safe_node_type(props.get("type", "concept")),
-                    content=props.get("content", ""),
-                    audience=_safe_audience(props.get("audience", "developer")),
-                    tags=_safe_tags(props.get("tags", [])),
-                    source_uri=_str_or_none(props.get("source_uri")),
-                    locator=_str_or_none(props.get("locator")),
-                )
+                return GraphNode.from_cypher_props(dict(raw_node.properties))
         except Exception as e:
             logger.error(f"FalkorDB get_node failed: {e}")
         return None
@@ -170,6 +160,22 @@ class FalkorDBStore(BaseGraphStore):
         except Exception as e:
             logger.error(f"FalkorDB get_edges failed: {e}")
             return []
+
+    def neighbors(
+        self,
+        graph_name: str,
+        node_id: str
+    ) -> List[Tuple[GraphEdge, str]]:
+        """Adjacency via the same Cypher edge projection used by get_edges."""
+        if not self._connected:
+            return self._memory_fallback.neighbors(graph_name, node_id)
+
+        pairs: List[Tuple[GraphEdge, str]] = []
+        for edge in self.get_edges(graph_name, node_id):
+            other = edge.target_id if edge.source_id == node_id else edge.source_id
+            if other:
+                pairs.append((edge, other))
+        return pairs
 
     def get_tag_nodes(self, graph_name: str) -> List[GraphNode]:
         if not self._connected:
@@ -226,15 +232,7 @@ class FalkorDBStore(BaseGraphStore):
                     if nid:
                         if nid not in node_map or node_map[nid][1] > hop:
                             node_map[nid] = (
-                                GraphNode(
-                                    id=nid,
-                                    title=props.get("title", ""),
-                                    type=_safe_node_type(props.get("type", "concept")),
-                                    content=props.get("content", ""),
-                                    tags=_safe_tags(props.get("tags", [])),
-                                    source_uri=_str_or_none(props.get("source_uri")),
-                                    locator=_str_or_none(props.get("locator")),
-                                ),
+                                GraphNode.from_cypher_props(dict(props)),
                                 hop
                             )
                 for r in p_rels:
@@ -310,18 +308,7 @@ class FalkorDBStore(BaseGraphStore):
             res = g.query(query, {"source_uri": source_uri})
             nodes = []
             for row in res.result_set:
-                props = row[0].properties
-                nodes.append(
-                    GraphNode(
-                        id=props.get("id"),
-                        title=props.get("title", ""),
-                        type=_safe_node_type(props.get("type", "concept")),
-                        content=props.get("content", ""),
-                        tags=_safe_tags(props.get("tags", [])),
-                        source_uri=_str_or_none(props.get("source_uri")),
-                        locator=_str_or_none(props.get("locator")),
-                    )
-                )
+                nodes.append(GraphNode.from_cypher_props(dict(row[0].properties)))
             return nodes
         except Exception as e:
             logger.error(f"FalkorDB get_nodes_by_source failed: {e}")

@@ -4,9 +4,21 @@ Detects whether an incoming query maps cleanly to known semantic tag nodes in th
 Supports deterministic stemming and normalization across query tokens and tag names.
 """
 
-from typing import List, Tuple, Set
+from typing import List, Optional, Tuple, Set
 import re
+from pydantic import BaseModel, Field
+
 from retelldb.models.schema import GraphNode
+
+
+class TagMatch(BaseModel):
+    """One auditable reason a query matched a tag node."""
+
+    tag_name: str
+    score: float
+    # exact | compact | stem | prefix | substring: how the match happened
+    rule: str = "exact"
+    node_id: Optional[str] = None
 
 
 def _stem_word(word: str) -> str:
@@ -54,6 +66,13 @@ def _normalize_phrase(text: str) -> str:
     return re.sub(r"[\-_/\s]+", " ", text).strip().lower()
 
 
+def _is_prefix_match(stem: str, query_stems: List[str], min_shared: int = 4) -> bool:
+    """True when a tag stem is a real prefix of a query stem (auth -> authentication)."""
+    if len(stem) < min_shared:
+        return False
+    return any(qs != stem and qs.startswith(stem) for qs in query_stems)
+
+
 class QueryClassifier:
     """Evaluates query token matches against graph tag taxonomy."""
 
@@ -67,8 +86,26 @@ class QueryClassifier:
         Check if the query matches known tag nodes with high confidence.
         Returns: (has_strong_tag_signal, matched_tag_names, confidence_score)
         """
-        if not graph_tags:
+        matches = self.match_tags(query, graph_tags)
+        if not matches:
             return False, [], 0.0
+        avg_confidence = sum(m.score for m in matches) / len(matches)
+        has_signal = len(matches) >= 1 and avg_confidence >= threshold
+        return has_signal, [m.tag_name for m in matches], avg_confidence
+
+    def match_tags(
+        self,
+        query: str,
+        graph_tags: List[GraphNode],
+    ) -> List[TagMatch]:
+        """
+        Return every tag match with the rule that produced it.
+
+        Each rule is explicit so a match can be explained. Nothing here silently
+        rewrites the query or the tag.
+        """
+        if not graph_tags:
+            return []
 
         q_lower = query.lower()
         q_norm = _normalize_phrase(query)
@@ -76,8 +113,21 @@ class QueryClassifier:
         q_stems = [_stem_word(t) for t in q_tokens]
         q_stem_set = set(q_stems)
 
-        matched_tags: List[str] = []
-        scores: List[float] = []
+        matches: List[TagMatch] = []
+        seen: Set[str] = set()
+
+        def add(tag_node: GraphNode, tag_name: str, score: float, rule: str) -> None:
+            if tag_name in seen:
+                return
+            seen.add(tag_name)
+            matches.append(
+                TagMatch(
+                    tag_name=tag_name,
+                    score=score,
+                    rule=rule,
+                    node_id=tag_node.id,
+                )
+            )
 
         for tag_node in graph_tags:
             tag_name = tag_node.title.lower().strip()
@@ -91,16 +141,14 @@ class QueryClassifier:
             # 1. Exact phrase/word match
             pattern = rf"\b{re.escape(tag_norm)}\b"
             if re.search(pattern, q_norm):
-                matched_tags.append(tag_name)
-                scores.append(1.0)
+                add(tag_node, tag_name, 1.0, "exact")
                 continue
 
             # 2. Compact compound match (e.g. "setup" <-> "set up", "quickstart" <-> "quick start")
             tag_compact = tag_norm.replace(" ", "")
             q_compact = q_norm.replace(" ", "")
             if len(tag_compact) >= 4 and tag_compact in q_compact:
-                matched_tags.append(tag_name)
-                scores.append(0.95)
+                add(tag_node, tag_name, 0.95, "compact")
                 continue
 
             # 3. Deterministic stemmed token match
@@ -108,30 +156,22 @@ class QueryClassifier:
                 if len(tag_stems) == 1:
                     stem = tag_stems[0]
                     if stem in q_stem_set:
-                        matched_tags.append(tag_name)
-                        scores.append(0.95)
+                        add(tag_node, tag_name, 0.95, "stem")
                         continue
-                    # Prefix / alias matching (e.g. tag "auth" matches "authentication")
-                    if stem == "auth" and any(qs.startswith("auth") for qs in q_stems):
-                        matched_tags.append(tag_name)
-                        scores.append(0.95)
+                    # Prefix matching (e.g. tag "auth" matches "authentication"). This is
+                    # a last-resort heuristic, labelled as such rather than passed off as
+                    # a real alias: configured aliases live in the tag taxonomy.
+                    if _is_prefix_match(stem, q_stems):
+                        add(tag_node, tag_name, 0.85, "prefix")
                         continue
                 else:
                     # Multi-token tag: all stems must be present in query
                     if all(ts in q_stem_set for ts in tag_stems):
-                        matched_tags.append(tag_name)
-                        scores.append(0.95)
+                        add(tag_node, tag_name, 0.95, "stem")
                         continue
 
             # 4. Fallback substring match for compound tags
             if len(tag_name) > 3 and tag_name in q_lower:
-                matched_tags.append(tag_name)
-                scores.append(0.8)
+                add(tag_node, tag_name, 0.8, "substring")
 
-        if not matched_tags:
-            return False, [], 0.0
-
-        avg_confidence = sum(scores) / len(scores)
-        has_signal = len(matched_tags) >= 1 and avg_confidence >= threshold
-
-        return has_signal, matched_tags, avg_confidence
+        return matches

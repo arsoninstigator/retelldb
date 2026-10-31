@@ -5,7 +5,14 @@ Base normalizer interface and normalized document representations.
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
-from retelldb.models.schema import NodeType, EdgeType, AudienceType, generate_node_id, generate_edge_id
+from retelldb.models.schema import (
+    NodeType,
+    EdgeType,
+    AudienceType,
+    SourceRef,
+    generate_node_id,
+    generate_edge_id,
+)
 import uuid
 
 
@@ -20,6 +27,7 @@ class CandidateNode(BaseModel):
     source_uri: Optional[str] = None
     locator: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    sources: List[SourceRef] = Field(default_factory=list)
 
     @classmethod
     def create_deterministic(
@@ -32,7 +40,8 @@ class CandidateNode(BaseModel):
         locator: str,
         content: str = "",
         tags: Optional[List[str]] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        sources: Optional[List[SourceRef]] = None
     ) -> "CandidateNode":
         det_id = generate_node_id(audience.value, source_uri, doc_title, type.value, locator)
         return cls(
@@ -44,7 +53,8 @@ class CandidateNode(BaseModel):
             tags=tags or [],
             source_uri=source_uri,
             locator=locator,
-            metadata=metadata or {}
+            metadata=metadata or {},
+            sources=sources or []
         )
 
 

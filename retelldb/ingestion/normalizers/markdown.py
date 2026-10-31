@@ -9,7 +9,7 @@ import re
 import yaml
 from typing import Optional, List, Dict, Tuple
 from retelldb.ingestion.normalizers.base import BaseNormalizer, NormalizedDocument, CandidateNode, CandidateEdge
-from retelldb.models.schema import NodeType, EdgeType, AudienceType
+from retelldb.models.schema import NodeType, EdgeType, AudienceType, SourceRef
 
 
 class MarkdownNormalizer(BaseNormalizer):
@@ -23,7 +23,7 @@ class MarkdownNormalizer(BaseNormalizer):
         source_uri: Optional[str] = None,
         **kwargs
     ) -> NormalizedDocument:
-        frontmatter, md_body = self._extract_frontmatter(content)
+        frontmatter, md_body, body_line_offset = self._extract_frontmatter(content)
         
         # Tags from frontmatter
         fm_tags = []
@@ -56,22 +56,35 @@ class MarkdownNormalizer(BaseNormalizer):
             source_uri=source_uri,
             doc_title=doc_title,
             locator="root",
-            metadata={"source_uri": source_uri, "is_root": True, **frontmatter}
+            metadata={"source_uri": source_uri, "is_root": True, **frontmatter},
+            sources=[
+                SourceRef(
+                    uri=source_uri,
+                    path=source_uri,
+                    line_start=1,
+                    line_end=max(1, body_line_offset + len(md_body.splitlines())),
+                    content_type="markdown",
+                    excerpt=md_body.strip()[:200],
+                )
+            ],
         )
         nodes.append(root_node)
 
         # Parse sections by headings
-        sections = self._split_by_headings(md_body)
+        sections = self._split_by_headings(md_body, line_offset=body_line_offset)
         
         section_nodes: Dict[int, CandidateNode] = {0: root_node}  # level -> last node at this level
 
-        for level, heading_text, section_body in sections:
+        for level, heading_text, section_body, head_line, end_line in sections:
             clean_heading = heading_text.strip()
             if not clean_heading:
                 continue
 
             node_type = self._detect_node_type(clean_heading, section_body)
-            code_blocks, text_without_code = self._extract_code_blocks(section_body)
+            # body starts on the line after the heading
+            code_blocks, text_without_code = self._extract_code_blocks(
+                section_body, body_start_line=head_line + 1
+            )
             section_tags = list(set(fm_tags + self._extract_inline_tags(clean_heading)))
             locator = f"heading-lvl{level}:{clean_heading}"
             
@@ -84,7 +97,17 @@ class MarkdownNormalizer(BaseNormalizer):
                 source_uri=source_uri,
                 doc_title=doc_title,
                 locator=locator,
-                metadata={"level": level, "source_uri": source_uri}
+                metadata={"level": level, "source_uri": source_uri},
+                sources=[
+                    SourceRef(
+                        uri=source_uri,
+                        path=source_uri,
+                        line_start=head_line,
+                        line_end=end_line,
+                        content_type="markdown",
+                        excerpt=(text_without_code.strip() or clean_heading)[:200],
+                    )
+                ],
             )
             nodes.append(section_node)
 
@@ -108,7 +131,7 @@ class MarkdownNormalizer(BaseNormalizer):
             )
 
             # Process code examples
-            for idx, (lang, code) in enumerate(code_blocks, 1):
+            for idx, (lang, code, code_start, code_end) in enumerate(code_blocks, 1):
                 example_title = f"{clean_heading} - Example {idx} ({lang})"
                 example_locator = f"{locator}:example-{idx}:{lang}"
                 example_node = CandidateNode.create_deterministic(
@@ -120,7 +143,17 @@ class MarkdownNormalizer(BaseNormalizer):
                     source_uri=source_uri,
                     doc_title=doc_title,
                     locator=example_locator,
-                    metadata={"language": lang, "parent_heading": clean_heading}
+                    metadata={"language": lang, "parent_heading": clean_heading},
+                    sources=[
+                        SourceRef(
+                            uri=source_uri,
+                            path=source_uri,
+                            line_start=code_start,
+                            line_end=code_end,
+                            content_type="code",
+                            excerpt=code.strip()[:200],
+                        )
+                    ],
                 )
                 nodes.append(example_node)
 
@@ -143,28 +176,44 @@ class MarkdownNormalizer(BaseNormalizer):
             global_tags=fm_tags
         )
 
-    def _extract_frontmatter(self, text: str) -> Tuple[Dict, str]:
+    def _extract_frontmatter(self, text: str) -> Tuple[Dict, str, int]:
+        """
+        Return (frontmatter, body, body_line_offset).
+
+        The offset keeps citation line numbers pointing at the real file rather than
+        at the body after frontmatter was stripped.
+        """
         match = re.match(r"^---\s*\n(.*?)\n---\s*\n", text, re.DOTALL)
         if match:
             fm_text = match.group(1)
             body = text[match.end():]
+            offset = text.count("\n", 0, match.end())
             try:
                 data = yaml.safe_load(fm_text) or {}
-                return data, body
+                return data, body, offset
             except Exception:
-                return {}, body
-        return {}, text
+                return {}, body, offset
+        return {}, text, 0
 
     def _extract_first_h1(self, text: str) -> Optional[str]:
         match = re.search(r"^#\s+(.+)$", text, re.MULTILINE)
         return match.group(1).strip() if match else None
 
-    def _split_by_headings(self, text: str) -> List[Tuple[int, str, str]]:
+    def _split_by_headings(
+        self, text: str, line_offset: int = 0
+    ) -> List[Tuple[int, str, str, int, int]]:
+        """
+        Split a document into (level, heading, body, heading_line, end_line).
+
+        Line numbers are 1-based and refer to the body passed in, so a citation can
+        point at the exact section it came from.
+        """
         heading_regex = re.compile(r"^(#{1,6})\s+(.+)$", re.MULTILINE)
         matches = list(heading_regex.finditer(text))
-        
+        total_lines = max(1, len(text.splitlines()))
+
         if not matches:
-            return [(1, "Content", text)]
+            return [(1, "Content", text, 1 + line_offset, total_lines + line_offset)]
 
         sections = []
         for i, match in enumerate(matches):
@@ -173,17 +222,29 @@ class MarkdownNormalizer(BaseNormalizer):
             start = match.end()
             end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
             body = text[start:end]
-            sections.append((level, heading, body))
+            head_line = text.count("\n", 0, match.start()) + 1 + line_offset
+            if i + 1 < len(matches):
+                end_line = max(
+                    head_line,
+                    text.count("\n", 0, matches[i + 1].start()) + line_offset,
+                )
+            else:
+                end_line = total_lines + line_offset
+            sections.append((level, heading, body, head_line, end_line))
 
         return sections
 
-    def _extract_code_blocks(self, text: str) -> Tuple[List[Tuple[str, str]], str]:
+    def _extract_code_blocks(
+        self, text: str, body_start_line: int = 1
+    ) -> Tuple[List[Tuple[str, str, int, int]], str]:
         code_regex = re.compile(r"```([a-zA-Z0-9_\-\.]*)\n(.*?)```", re.DOTALL)
         blocks = []
         for match in code_regex.finditer(text):
             lang = match.group(1).strip() or "text"
             code = match.group(2)
-            blocks.append((lang, code))
+            start_line = body_start_line + text.count("\n", 0, match.start())
+            end_line = start_line + max(1, code.count("\n"))
+            blocks.append((lang, code, start_line, end_line))
 
         cleaned_text = code_regex.sub("[Code Example]", text)
         return blocks, cleaned_text

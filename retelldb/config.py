@@ -60,10 +60,30 @@ class InferenceConfig(BaseModel):
     )
 
 
+class WranglingConfig(BaseModel):
+    """Tag wrangling behaviour: canonical tags, walk weights, confidence tiers."""
+    # path to a JSON/YAML tag taxonomy; empty means no aliasing and no hierarchy
+    taxonomy_path: Optional[str] = Field(default_factory=lambda: os.getenv("RETELLDB_TAXONOMY_PATH"))
+    # edges lighter than this are never walked
+    min_edge_weight: float = Field(
+        default_factory=lambda: float(os.getenv("RETELLDB_MIN_EDGE_WEIGHT", "0.05"))
+    )
+    # per-component dampener floor used when building confidence
+    dampener_floor: float = Field(
+        default_factory=lambda: float(os.getenv("RETELLDB_DAMPENER_FLOOR", "0.45"))
+    )
+    # hop distance decay applied to traversal hits
+    hop_decay: float = Field(
+        default_factory=lambda: float(os.getenv("RETELLDB_HOP_DECAY", "0.85"))
+    )
+
+
 class RetellDBConfig(BaseModel):
     """Global RetellDB config."""
     storage: StorageConfig = Field(default_factory=StorageConfig)
     inference: InferenceConfig = Field(default_factory=InferenceConfig)
+    wrangling: WranglingConfig = Field(default_factory=WranglingConfig)
+    taxonomy_path: Optional[str] = Field(default_factory=lambda: os.getenv("RETELLDB_TAXONOMY_PATH"))
     host: str = Field(default_factory=lambda: os.getenv("RETELLDB_HOST", "0.0.0.0"))
     port: int = Field(default_factory=lambda: int(os.getenv("RETELLDB_PORT", "8000")))
     allowed_origins: List[str] = Field(default_factory=lambda: ["*"])

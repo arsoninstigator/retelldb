@@ -124,7 +124,8 @@ class LLMExtractor:
             tags=sorted(list(tags)),
             source_uri=candidate.source_uri,
             locator=candidate.locator,
-            metadata=candidate.metadata
+            metadata=candidate.metadata,
+            sources=list(candidate.sources)
         )
 
     def _infer_edges_with_llm(self, nodes: List[GraphNode]) -> List[GraphEdge]:
@@ -189,7 +190,8 @@ class LLMExtractor:
             tags=sorted(list(tags)),
             source_uri=candidate.source_uri,
             locator=candidate.locator,
-            metadata=candidate.metadata
+            metadata=candidate.metadata,
+            sources=list(candidate.sources)
         )
 
     def _heuristic_infer_edges(self, nodes: List[GraphNode]) -> List[GraphEdge]:
