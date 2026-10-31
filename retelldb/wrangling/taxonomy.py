@@ -54,6 +54,8 @@ class CanonicalTag(BaseModel):
     parents: List[str] = Field(default_factory=list)
     # explicit association strengths, never inferred from vector distance
     related: Dict[str, float] = Field(default_factory=dict)
+    # mutually exclusive tags: an edge between these is never proposed or stored
+    excludes: List[str] = Field(default_factory=list)
 
     def normalized_name(self) -> str:
         return normalize_tag(self.name)
@@ -126,6 +128,9 @@ class TagTaxonomy(BaseModel):
                     aliases=aliases,
                     parents=[normalize_tag(p) for p in entry.get("parents", []) or []],
                     related=related,
+                    excludes=[
+                        normalize_tag(x) for x in entry.get("excludes", []) or []
+                    ],
                 )
             )
         return cls(tags=tags)

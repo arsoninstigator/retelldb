@@ -113,6 +113,40 @@ closes a request at 60s and that is what actually finishes in time on this corpu
 batching follows from the same limit: 12 tags per request (16 took 57s, 20 timed out), so
 `--batch-size` defaults to 12 and `RETELLDB_TAXONOMY_BATCH` style overrides are not needed.
 
+### latent associations, proposed not asserted
+
+memorium's rule is that embeddings are demoted from "the thing that understands the
+knowledge base" to one component of retrieval: associations are explicit weighted edges a
+human can inspect. retelldb keeps that line. vector distance never creates an edge at query
+time, and one command does the job latent space is actually good at:
+
+```bash
+retelldb taxonomy associate taxonomy.yaml --out associations.yaml   # review the proposals
+retelldb taxonomy associate taxonomy.yaml --apply                   # accept them
+```
+
+the run embeds each canonical tag as its name plus aliases (the words humans actually
+typed), compares every pair by cosine, and writes proposals with the raw similarity kept as
+provenance. refreshing rules, all of them load bearing:
+
+- below the threshold is silence, and the count of silences is reported
+- an association already configured is skipped, so a reviewed weight is never overwritten
+- an exclusion pair is never proposed, in either direction (`excludes` is now part of a tag)
+- each tag keeps its strongest neighbours, so one hub cannot claim the whole taxonomy
+- the run reports the corpus distribution (median, p90, pairs compared), because a threshold
+  is only meaningful relative to the corpus it runs on
+
+proposals are labelled with the same confidence tiers as retrieval (`high` from 0.75,
+`uncertain` from 0.45). on the eval corpus, 32 canonical tags produced 55 proposals with the
+corpus sitting at median 0.549 and p90 0.649: the top edges (`api` <-> `sdk` at 0.80,
+`api` <-> `architecture` at 0.71) are the ones a human would draw, and the weak tail is
+labelled weak instead of hidden.
+
+the embedder is build-time only, like the generator: `retelldb/buildtime/featherless.py`
+calls the Qwen3-Embedding family and raises when it cannot. it does **not** fall back to
+retelldb's token projection, because token overlap is not latent space, and proposing tag
+associations from it would dress a hash collision up as semantics.
+
 ### the provider is a build dependency, never a runtime one
 
 generation runs during a build and its output is a reviewed `taxonomy.yaml` that ships with

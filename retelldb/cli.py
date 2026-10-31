@@ -219,6 +219,80 @@ def taxonomy_generate(paths, audience, out, provider, model, base_url, batch_siz
     click.echo("Review the file, then set RETELLDB_TAXONOMY_PATH to use it.")
 
 
+@taxonomy.command("associate")
+@click.argument("path", type=click.Path(exists=True, path_type=Path))
+@click.option("--model", default=None,
+              help="Embedding model id (Featherless Qwen3-Embedding family).")
+@click.option("--threshold", default=None, type=float,
+              help="Minimum cosine similarity to propose. Defaults to the uncertain tier.")
+@click.option("--max-per-tag", default=None, type=int,
+              help="Neighbours kept per tag, strongest first.")
+@click.option("--out", "-o", default=Path("associations.yaml"), type=click.Path(path_type=Path),
+              help="Where to write the proposals for review.")
+@click.option("--apply", is_flag=True,
+              help="Accept every proposal into the taxonomy. Configured weights still win.")
+def taxonomy_associate(path, model, threshold, max_per_tag, out, apply):
+    """
+    Propose association edges from latent tag similarity.
+
+    Embeddings propose, a human accepts: the run writes proposals with their scores as
+    provenance and touches no graph. --apply writes the accepted strengths into the
+    taxonomy file after you have read them.
+    """
+    from retelldb.wrangling.generator import taxonomy_to_yaml
+    from retelldb.wrangling.latent import (
+        DEFAULT_MAX_PER_TAG,
+        MIN_SIMILARITY,
+        LatentError,
+        apply_proposals,
+        embed_taxonomy,
+        propose_associations,
+        proposals_to_yaml,
+    )
+    from retelldb.wrangling.taxonomy import TagTaxonomy
+
+    taxonomy = TagTaxonomy.from_file(path)
+    if not taxonomy.tags:
+        raise click.ClickException(f"{path} has no canonical tags to associate")
+
+    # build-time only: the embedder itself refuses to run in a production deployment
+    from retelldb.buildtime.featherless import EmbeddingUnavailable, FeatherlessEmbedder
+
+    try:
+        embedder = FeatherlessEmbedder(model=model) if model else FeatherlessEmbedder()
+        vectors = embed_taxonomy(embedder, taxonomy)
+        report = propose_associations(
+            taxonomy,
+            vectors,
+            threshold=threshold if threshold is not None else MIN_SIMILARITY,
+            max_per_tag=max_per_tag or DEFAULT_MAX_PER_TAG,
+            embedder=embedder.name,
+        )
+    except (LatentError, EmbeddingUnavailable, RuntimeError) as exc:
+        raise click.ClickException(str(exc))
+
+    out.write_text(proposals_to_yaml(report), encoding="utf-8")
+    click.echo(
+        f"Embedded {report.tags_embedded} tags with {report.embedder} "
+        f"({report.dimension}-dim, threshold {report.threshold})."
+    )
+    click.echo(
+        f"{len(report.proposals)} proposals, {report.below_threshold} pairs below threshold, "
+        f"{report.skipped_already_related} already configured, "
+        f"{report.blocked_by_exclusion} blocked by an exclusion."
+    )
+    click.echo(
+        f"This corpus sits at median {report.similarity_median} and p90 "
+        f"{report.similarity_p90} across {report.pairs_compared} pairs."
+    )
+    click.echo(f"Wrote {out}. Review it, then re-run with --apply to accept.")
+
+    if apply:
+        apply_proposals(taxonomy, report)
+        path.write_text(taxonomy_to_yaml(taxonomy), encoding="utf-8")
+        click.echo(f"Applied {len(report.proposals)} associations to {path}.")
+
+
 @taxonomy.command("validate")
 @click.argument("path", type=click.Path(exists=True, path_type=Path))
 def taxonomy_validate(path):

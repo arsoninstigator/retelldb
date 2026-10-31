@@ -1,5 +1,27 @@
 # changelog
 
+## 0.2.4
+
+### added
+
+- `retelldb taxonomy associate`: latent tag similarity proposes association edges, and a human
+  accepts them. embeddings never create an edge at query time, which is the memorium rule
+  applied literally: the proposal carries the raw cosine as provenance, `--apply` writes the
+  accepted strength, and a configured weight is never overwritten.
+- exclusion pairs are never bridged. `excludes` is now a first-class field on a canonical tag,
+  parsed from yaml, serialised back, respected by both proposal and apply.
+- per-tag neighbour budget keeps the strongest edges, so a hub cannot claim the taxonomy.
+- reports the corpus distribution (pairs compared, median, p90) so a threshold can be chosen
+  against evidence instead of vibes. on the eval corpus: 32 tags, 55 proposals, median 0.549.
+- `retelldb/buildtime/featherless.py`: Qwen3-Embedding over the Featherless endpoint, build-time
+  only, dimension-checked, and honest about failure. no token-projection fallback, because
+  token overlap is not latent space.
+
+### notes
+
+- the embedding lane obeys the same containment as the generator: `assert_build_time` on
+  construction, and a production deployment raises instead of calling out.
+
 ## 0.2.3
 
 ### fixed

@@ -400,6 +400,7 @@ def taxonomy_to_yaml(taxonomy: TagTaxonomy) -> str:
                 ],
                 **({"parents": list(tag.parents)} if tag.parents else {}),
                 **({"related": dict(tag.related)} if tag.related else {}),
+                **({"excludes": list(tag.excludes)} if tag.excludes else {}),
             }
             for tag in taxonomy.tags
         ]
