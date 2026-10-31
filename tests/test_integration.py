@@ -569,3 +569,29 @@ class TestMemoryFallback:
         results = store.similarity_search(TEST_GRAPH_DEV, emb, top_k=5)
         ids = [r[0] for r in results]
         assert "fallback-vec-001" in ids, "Memory fallback must serve similarity_search"
+
+
+# ===========================================================================
+# REGRESSION: fresh database initialisation order
+# ===========================================================================
+
+
+@pytest.mark.integration
+class TestFreshDatabaseInit:
+    """
+    A brand new database has no vector type until the extension is created, so the store
+    must run its schema first and register the client adapter second. Getting this order
+    backwards made every pgvector call fall back to memory against a perfectly healthy
+    Postgres.
+    """
+
+    def test_store_connects_on_a_database_without_the_extension(self):
+        from retelldb.storage.pgvector_store import PGVectorStore
+
+        cfg = _make_storage_config(pg_dsn=PG_DSN)
+        store = PGVectorStore(config=cfg)
+        assert store._connected is True, "fresh database must not fall back to memory"
+
+        store.add_embedding(TEST_GRAPH_DEV, "fresh-init-001", [0.2, 0.2, 0.2, 0.2])
+        hits = store.similarity_search(TEST_GRAPH_DEV, [0.2, 0.2, 0.2, 0.2], k=1)
+        assert [h.node_id for h in hits] == ["fresh-init-001"]

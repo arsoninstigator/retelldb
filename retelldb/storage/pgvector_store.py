@@ -30,8 +30,11 @@ class PGVectorStore(BaseVectorStore):
             import psycopg
             from pgvector.psycopg import register_vector
             self._conn = psycopg.connect(self.config.pg_dsn, autocommit=True)
-            register_vector(self._conn)
+            # the extension (and its vector type) has to exist before the client adapter can
+            # resolve it, so schema first and registration second. on a fresh database the old
+            # order raised "vector type not found" and silently fell back to memory.
             self._init_db()
+            register_vector(self._conn)
             self._connected = True
             logger.info("Connected to pgvector successfully.")
         except Exception as e:

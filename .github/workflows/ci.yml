@@ -68,24 +68,6 @@ jobs:
         run: docker compose up -d --wait --wait-timeout 180
       - name: backend status
         run: docker compose ps
-      - name: probe pgvector
-        run: |
-          python - <<'PY'
-          import psycopg
-
-          dsn = "postgresql://postgres:postgres@localhost:5432/retelldb"
-          with psycopg.connect(dsn, autocommit=True) as conn:
-              print("server:", conn.execute("select version()").fetchone()[0][:60])
-          from pgvector.psycopg import register_vector
-
-          with psycopg.connect(dsn, autocommit=True) as conn:
-              register_vector(conn)
-              print("vector type registered")
-          from retelldb.storage.pgvector_store import PGVectorStore
-
-          store = PGVectorStore()
-          print("store connected:", store._connected)
-          PY
       - name: integration suite
         run: python -m pytest tests/test_integration.py -m integration -q -rs --log-cli-level=WARNING --junitxml=integration.xml
       - name: no silent skips
