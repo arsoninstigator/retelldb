@@ -230,6 +230,17 @@ flowchart TD
 
 ---
 
+## ci
+
+`.github/workflows/ci.yml` runs the unit suite on the supported python floor and ceiling,
+then gates on the eval hit rate. jobs run on **tenki runners** (`tenki-standard-small-2c-4g`),
+which are a drop-in replacement for github-hosted runners: only the `runs-on` value differs.
+
+one-time setup, done once per org rather than per push: install the tenki github app on the
+`retelldb` org and grant it this repository (tenki dashboard -> runners -> github connection).
+until that is done, jobs sit in the queue waiting for a runner with the tenki label instead of
+failing.
+
 ## known issues & limitations
 
 - **one eval miss left**: the golden query `dev_ingest_example` retrieves the example node

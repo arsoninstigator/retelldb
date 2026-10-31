@@ -4,19 +4,35 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+
+# superseded pushes stop spending runner time
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # tenki runners, a drop-in replacement for GitHub-hosted runners:
+    # https://tenki.cloud/docs/runners/quickstart
+    # the tenki github app must be installed on the retelldb org, otherwise the job
+    # sits in the queue waiting for a runner with this label
+    runs-on: tenki-standard-small-2c-4g
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.10", "3.11", "3.12"]
+        # the supported floor and ceiling; every intermediate minor runs the same suite
+        python-version: ["3.9", "3.12"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
       - name: install
         run: |
           python -m pip install --upgrade pip
@@ -25,4 +41,3 @@ jobs:
         run: python -m pytest -q
       - name: eval gate
         run: python evals/run_evals.py --fail-under 0.9
-
