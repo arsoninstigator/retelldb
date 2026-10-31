@@ -26,5 +26,3 @@ jobs:
       - name: eval gate
         run: python evals/run_evals.py --fail-under 0.9
 
-# to activate: move this file to .github/workflows/ci.yml
-# (a github token with the `workflow` scope is required to push files under .github/workflows/)
