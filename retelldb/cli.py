@@ -125,7 +125,8 @@ def taxonomy():
               help="Where the taxonomy is generated. openai-compat covers any chat-completions endpoint.")
 @click.option("--model", default=None, help="Generator model id, if the provider needs one.")
 @click.option("--base-url", default=None, help="Override the Adaption Labs API base URL.")
-@click.option("--batch-size", default=60, type=int, help="Tags per generation request.")
+@click.option("--batch-size", default=None, type=int,
+              help="Tags per generation request. Defaults to the generator's safe batch size.")
 @click.option("--dry-run", is_flag=True, help="Collect tags and print the prompt; call nothing.")
 def taxonomy_generate(paths, audience, out, provider, model, base_url, batch_size, dry_run):
     """
@@ -136,6 +137,7 @@ def taxonomy_generate(paths, audience, out, provider, model, base_url, batch_siz
     you point the config at the written file.
     """
     from retelldb.wrangling.generator import (
+        DEFAULT_BATCH_SIZE,
         GenerationError,
         build_prompt,
         collect_inventory,
@@ -174,6 +176,7 @@ def taxonomy_generate(paths, audience, out, provider, model, base_url, batch_siz
     tag_nodes = client.graph_store.get_tag_nodes(graph_name)
     inventory = collect_inventory([t.title for t in tag_nodes])
 
+    batch_size = batch_size or DEFAULT_BATCH_SIZE
     click.echo(f"Collected {len(inventory.tags)} raw tags from {len(documents)} document(s).")
     if dry_run:
         click.echo(build_prompt(inventory.tags[:batch_size], inventory.snippets))

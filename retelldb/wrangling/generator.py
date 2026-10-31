@@ -28,7 +28,9 @@ from retelldb.wrangling.taxonomy import AliasRule, CanonicalTag, TagTaxonomy, no
 logger = logging.getLogger("retelldb.wrangling.generator")
 
 DEFAULT_TIMEOUT = 60.0
-DEFAULT_BATCH_SIZE = 60
+# the hosted endpoint sits behind a gateway that closes the connection at 60s, and a
+# reasoning model finishes roughly 12 tags inside that window. 16 took 57s, 20 timed out.
+DEFAULT_BATCH_SIZE = 12
 MAX_SNIPPET_CHARS = 400
 
 
@@ -86,10 +88,19 @@ def extract_text(data: object) -> Optional[str]:
     if isinstance(output, list):
         parts: List[str] = []
         for item in output:
-            if isinstance(item, dict):
-                for entry in item.get("content", []) or []:
-                    if isinstance(entry, dict) and isinstance(entry.get("text"), str):
-                        parts.append(entry["text"])
+            if not isinstance(item, dict):
+                continue
+            # reasoning items carry their chain of thought in the same shape as answers,
+            # and feeding that to the parser breaks the json contract
+            if item.get("type") not in (None, "message"):
+                continue
+            for entry in item.get("content") or []:
+                if not isinstance(entry, dict):
+                    continue
+                if entry.get("type") not in (None, "output_text"):
+                    continue
+                if isinstance(entry.get("text"), str):
+                    parts.append(entry["text"])
         if parts:
             return "\n".join(parts)
 

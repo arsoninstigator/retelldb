@@ -146,7 +146,9 @@ def test_generate_taxonomy_reports_uncovered_and_dangling():
     assert report["ambiguous"][0]["raw"] == "auth"
 
 
-def test_generation_fails_without_a_key():
+def test_generation_fails_without_a_key(monkeypatch):
+    monkeypatch.delenv("ADAPTIONLABS_API_KEY", raising=False)
+    monkeypatch.delenv("ADAPTION_LABS_API_KEY", raising=False)
     with pytest.raises(GenerationError):
         generate_taxonomy(collect_inventory(["dev"]), AdaptionTransport(api_key=""))
 
@@ -245,3 +247,104 @@ class TestBuildTimeContainment:
         )
         result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True)
         assert result.returncode == 0, f"runtime import pulled build-time code in: {result.stdout}{result.stderr}"
+
+
+class TestAdaptionEndpointWiring:
+    """
+    The hosted endpoint is versioned under /api/v1, insists on a model name, and answers with
+    a Responses-shaped payload whose reasoning items must never reach the json parser.
+    """
+
+    def test_base_url_accepts_every_documented_form(self):
+        from retelldb.buildtime.adaption import DEFAULT_BASE_URL, normalize_base_url
+
+        for form in (
+            DEFAULT_BASE_URL,
+            f"{DEFAULT_BASE_URL}/",
+            f"{DEFAULT_BASE_URL}/v1",
+            f"{DEFAULT_BASE_URL}/api/v1",
+            f"{DEFAULT_BASE_URL}/api/v1/",
+            None,
+            "",
+        ):
+            assert normalize_base_url(form) == DEFAULT_BASE_URL
+
+    def test_request_names_a_model_and_the_versioned_route(self, monkeypatch):
+        import httpx
+        from retelldb.buildtime import adaption
+
+        captured = {}
+
+        class _Response:
+            status_code = 200
+
+            @staticmethod
+            def json():
+                return {"output_text": '{"tags": []}'}
+
+        def fake_post(url, json=None, headers=None, timeout=None):
+            captured["url"] = url
+            captured["json"] = json
+            captured["headers"] = headers
+            return _Response()
+
+        monkeypatch.setattr(httpx, "post", fake_post)
+        transport = adaption.AdaptionTransport(api_key="pt_test")
+        assert transport.complete("system", "prompt") == '{"tags": []}'
+
+        assert captured["url"] == f"{adaption.DEFAULT_BASE_URL}/api/v1/responses"
+        assert captured["json"]["model"] == adaption.DEFAULT_MODEL
+        assert [m["role"] for m in captured["json"]["input"]] == ["system", "user"]
+        assert captured["headers"]["Authorization"] == "Bearer pt_test"
+
+    def test_base_url_override_keeps_one_version_prefix(self, monkeypatch):
+        import httpx
+        from retelldb.buildtime import adaption
+
+        seen = {}
+
+        class _Response:
+            status_code = 200
+
+            @staticmethod
+            def json():
+                return {"output_text": "ok"}
+
+        def fake_post(url, **kwargs):
+            seen["url"] = url
+            return _Response()
+
+        monkeypatch.setattr(httpx, "post", fake_post)
+        transport = adaption.AdaptionTransport(api_key="k", base_url=f"{adaption.DEFAULT_BASE_URL}/v1")
+        transport.complete("s", "p")
+        assert seen["url"] == f"{adaption.DEFAULT_BASE_URL}/api/v1/responses"
+
+    def test_reasoning_items_never_reach_the_parser(self):
+        from retelldb.wrangling.generator import extract_text
+
+        response = {
+            "output": [
+                {
+                    "type": "reasoning",
+                    "content": [{"type": "reasoning_text", "text": "let me think about tags"}],
+                },
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": '{"tags": [{"canonical": "auth"}]}'}],
+                },
+            ],
+            "output_text": '{"tags": [{"canonical": "auth"}]}',
+        }
+        assert extract_text(response) == '{"tags": [{"canonical": "auth"}]}'
+
+        only_reasoning = {"output": [{"type": "reasoning", "content": [{"text": "hmm"}]}]}
+        assert extract_text(only_reasoning) is None
+
+    def test_default_batch_size_fits_the_gateway_window(self):
+        from retelldb.buildtime import adaption
+        from retelldb.wrangling.generator import DEFAULT_BATCH_SIZE
+
+        # measured: 12 tags finish in about 22s, 16 tags took 57s, 20 tags hit the 60s gateway
+        assert 6 <= DEFAULT_BATCH_SIZE <= 12
+        assert adaption.DEFAULT_TIMEOUT <= 60

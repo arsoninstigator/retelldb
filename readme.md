@@ -92,7 +92,26 @@ export RETELLDB_TAXONOMY_PATH=taxonomy.yaml
 
 Adaption Labs is the default provider. `--provider openai-compat` points the same
 generator at any chat-completions endpoint (`--base-url`, `--model`), which is useful when
-the primary provider is unavailable. `ADAPTIONLABS_BASE_URL` overrides the endpoint.
+the primary provider is unavailable.
+
+the endpoint is `https://api.prod.adaptionlabs.ai/api/v1` (the docs call it `/v1`, the routes
+carry the `/api` prefix): `GET /models`, `POST /responses`, `GET /health`. every request must
+name a model, and the response is Responses-shaped, so the extractor reads `output_text` and
+ignores the `reasoning` items rather than feeding chain-of-thought to the json parser.
+
+`ADAPTIONLABS_BASE_URL` overrides the host (with or without the version suffix) and
+`ADAPTIONLABS_MODEL` overrides the model. the default is `gemma-4-31b-it`, because the gateway
+closes a request at 60s and that is what actually finishes in time on this corpus:
+
+| model | 12-tag batch | taxonomy quality |
+| --- | --- | --- |
+| gemma-4-31b-it | ~22s | 31 canonical, 1 dangling reference, 3 uncovered (default) |
+| gemma-4-26b-a4b-it | ~4s | 34 canonical but 16 dangling references |
+| deepseek-v4-flash | ~35s | drifts past the window on some batches |
+| glm-5.2, qwen3.8-27b | 60s timeout | reasoning models spend the whole window thinking, gateway 504s |
+
+batching follows from the same limit: 12 tags per request (16 took 57s, 20 timed out), so
+`--batch-size` defaults to 12 and `RETELLDB_TAXONOMY_BATCH` style overrides are not needed.
 
 ### the provider is a build dependency, never a runtime one
 

@@ -1,5 +1,26 @@
 # changelog
 
+## 0.2.3
+
+### fixed
+
+- the provider now points at the real endpoint, `https://api.prod.adaptionlabs.ai/api/v1`
+  (routes carry the `/api` prefix even though the docs say `/v1`). the old
+  `api.adaptionlabs.ai` host answers 404 on every path.
+- every request names a model, because the endpoint rejects a request without one. the default
+  is `gemma-4-31b-it`; `ADAPTIONLABS_MODEL` and `--model` override it.
+- the extractor skips `reasoning` items and reads the assistant `message`, so chain-of-thought
+  never reaches the json parser. it also used a private method that no longer existed after the
+  build-time split.
+- `normalize_base_url` accepts the host with or without `/v1` or `/api/v1`.
+- batch size defaults to 12: the gateway closes a request at 60s, 16 tags took 57s and 20 timed
+  out. the cli option no longer hardcodes 60.
+
+### verified
+
+- taxonomy generation runs end to end against the live provider on the eval corpus: 46 raw tags
+  in, 32 canonical tags and 25 aliases out, clean validation.
+
 ## 0.2.2
 
 ### changed

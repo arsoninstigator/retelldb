@@ -16,7 +16,32 @@ from retelldb.wrangling.generator import DEFAULT_TIMEOUT, extract_text
 
 logger = logging.getLogger("retelldb.buildtime.adaption")
 
-DEFAULT_BASE_URL = "https://api.adaptionlabs.ai"
+DEFAULT_BASE_URL = "https://api.prod.adaptionlabs.ai"
+#: every call must name a model; the endpoint rejects a request without one
+#: measured on the retelldb eval corpus behind a gateway that closes at 60s: gemma-4-31b-it
+#: answers a 12-tag batch in ~22s with the cleanest hierarchy (1 dangling reference, 3
+#: uncovered tags). deepseek-v4-flash takes ~35s and drifts, glm-5.2 and qwen3.8-27b spend the
+#: whole window reasoning and get 504'd, so both are opt-in via --model.
+DEFAULT_MODEL = "gemma-4-31b-it"
+#: the routes live under /api/v1 on this host, even though the docs call it /v1
+API_PREFIX = "/api/v1"
+
+
+def normalize_base_url(base_url: Optional[str]) -> str:
+    """
+    Accept the host with or without the version suffix.
+
+    `https://api.prod.adaptionlabs.ai`, `.../v1` and `.../api/v1` all mean the same base,
+    because the transport appends `/api/v1/responses` itself.
+    """
+    url = (base_url or "").strip().rstrip("/")
+    if not url:
+        return DEFAULT_BASE_URL
+    for suffix in ("/api/v1", "/v1"):
+        if url.endswith(suffix):
+            url = url[: -len(suffix)]
+            break
+    return url.rstrip("/") or DEFAULT_BASE_URL
 
 #: deployment signals that mean "not a build"
 PRODUCTION_VALUES = {"production", "prod", "live"}
@@ -55,7 +80,7 @@ class AdaptionTransport:
     def __init__(
         self,
         api_key: Optional[str] = None,
-        base_url: str = DEFAULT_BASE_URL,
+        base_url: Optional[str] = None,
         model: Optional[str] = None,
         timeout: float = DEFAULT_TIMEOUT,
     ):
@@ -63,8 +88,10 @@ class AdaptionTransport:
         self.api_key = api_key or os.getenv("ADAPTIONLABS_API_KEY") or os.getenv(
             "ADAPTION_LABS_API_KEY"
         )
-        self.base_url = (base_url or os.getenv("ADAPTIONLABS_BASE_URL") or DEFAULT_BASE_URL).rstrip("/")
-        self.model = model
+        self.base_url = normalize_base_url(
+            base_url or os.getenv("ADAPTIONLABS_BASE_URL")
+        )
+        self.model = model or os.getenv("ADAPTIONLABS_MODEL") or DEFAULT_MODEL
         self.timeout = timeout
 
     def available(self) -> bool:
@@ -77,17 +104,16 @@ class AdaptionTransport:
             return None
 
         payload: Dict[str, object] = {
+            "model": self.model,
             "input": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": prompt},
-            ]
+            ],
         }
-        if self.model:
-            payload["model"] = self.model
 
         try:
             response = httpx.post(
-                f"{self.base_url}/api/v1/responses",
+                f"{self.base_url}{API_PREFIX}/responses",
                 json=payload,
                 headers={"Authorization": f"Bearer {self.api_key}"},
                 timeout=self.timeout,
@@ -105,7 +131,7 @@ class AdaptionTransport:
             return None
 
         try:
-            return self._extract_text(response.json())
+            return extract_text(response.json())
         except Exception as exc:
             logger.error("Adaption response was not JSON: %s", exc)
             return None
