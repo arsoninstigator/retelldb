@@ -4,7 +4,6 @@ RetellDB Command-Line Interface.
 
 import click
 import json
-import uvicorn
 from pathlib import Path
 from retelldb.client import RetellDB
 from retelldb.models.schema import AudienceType
@@ -23,6 +22,10 @@ def main():
 @click.option("--reload", is_flag=True, help="Enable auto-reload for dev.")
 def serve(host: str, port: int, reload: bool):
     """Start the RetellDB hosted API server."""
+    try:
+        import uvicorn
+    except ImportError:
+        raise click.ClickException("uvicorn is not installed; pip install 'retelldb[all]'")
     click.echo(f"Starting RetellDB API server on http://{host}:{port}...")
     uvicorn.run("retelldb.server.app:app", host=host, port=port, reload=reload)
 
@@ -107,3 +110,105 @@ def status(url: str):
 
 if __name__ == "__main__":
     main()
+
+
+@main.group()
+def taxonomy():
+    """Build and inspect the canonical tag ontology."""
+    pass
+
+
+@taxonomy.command("generate")
+@click.argument("paths", nargs=-1, type=click.Path(exists=True, path_type=Path))
+@click.option("--audience", "-a", default="developer", type=click.Choice(["developer", "user"]))
+@click.option("--out", "-o", default="taxonomy.yaml", type=click.Path(path_type=Path),
+              help="Where to write the reviewed taxonomy.")
+@click.option("--model", default=None, help="Generator model id, if the provider needs one.")
+@click.option("--base-url", default=None, help="Override the Adaption Labs API base URL.")
+@click.option("--batch-size", default=60, type=int, help="Tags per generation request.")
+@click.option("--dry-run", is_flag=True, help="Collect tags and print the prompt; call nothing.")
+def taxonomy_generate(paths, audience, out, model, base_url, batch_size, dry_run):
+    """
+    Generate a tag taxonomy from the raw tags in a set of documents.
+
+    The files are ingested into an in-memory graph to discover the tags the corpus
+    actually produces. Nothing is written to a live graph and nothing is aliased until
+    you point the config at the written file.
+    """
+    from retelldb.wrangling.generator import (
+        AdaptionTransport,
+        GenerationError,
+        build_prompt,
+        collect_inventory,
+        generate_taxonomy,
+        taxonomy_to_yaml,
+    )
+
+    if not paths:
+        raise click.UsageError("give at least one document path")
+
+    client = RetellDB(use_memory=True)
+    graph_name = (
+        client.config.storage.dev_graph_name
+        if audience == "developer"
+        else client.config.storage.user_graph_name
+    )
+
+    for path in paths:
+        client.ingest(
+            content=path.read_text(encoding="utf-8"),
+            format=IngestDocumentFormat("markdown" if path.suffix in (".md", ".mdx") else "html"),
+            audience=AudienceType(audience),
+            title=path.stem,
+            source_uri=str(path),
+        )
+
+    tag_nodes = client.graph_store.get_tag_nodes(graph_name)
+    inventory = collect_inventory([t.title for t in tag_nodes])
+
+    click.echo(f"Collected {len(inventory.tags)} raw tags from {len(paths)} document(s).")
+    if dry_run:
+        click.echo(build_prompt(inventory.tags[:batch_size], inventory.snippets))
+        return
+
+    transport = AdaptionTransport(
+        base_url=base_url or "https://api.adaptionlabs.ai", model=model
+    )
+    try:
+        generated, report = generate_taxonomy(
+            inventory, transport, batch_size=batch_size
+        )
+    except GenerationError as exc:
+        raise click.ClickException(str(exc))
+
+    out.write_text(taxonomy_to_yaml(generated), encoding="utf-8")
+    click.echo(f"Wrote {out} with {report['canonical_count']} canonical tags "
+               f"and {report['alias_count']} aliases.")
+    uncovered = report.get("uncovered_raw_tags") or []
+    if uncovered:
+        click.echo(f"Uncovered raw tags ({len(uncovered)}): {', '.join(uncovered[:20])}")
+    collisions = report.get("alias_collisions") or []
+    if collisions:
+        click.echo(f"Alias collisions to review: {', '.join(collisions)}")
+    ambiguous = report.get("ambiguous") or []
+    if ambiguous:
+        click.echo(f"Ambiguous tags left unresolved: {len(ambiguous)}")
+    click.echo("Review the file, then set RETELLDB_TAXONOMY_PATH to use it.")
+
+
+@taxonomy.command("validate")
+@click.argument("path", type=click.Path(exists=True, path_type=Path))
+def taxonomy_validate(path):
+    """Load a taxonomy file and report what it declares."""
+    from retelldb.wrangling.taxonomy import TagTaxonomy
+
+    loaded = TagTaxonomy.from_file(path)
+    canonicals = loaded.canonical_names()
+    alias_count = sum(len(t.aliases) for t in loaded.tags)
+    dangling = sorted(
+        {ref for tag in loaded.tags for ref in list(tag.parents) + list(tag.related)}
+        - set(canonicals)
+    )
+    click.echo(f"{path}: {len(canonicals)} canonical tags, {alias_count} aliases")
+    if dangling:
+        click.echo(f"References with no canonical tag: {', '.join(dangling)}")
