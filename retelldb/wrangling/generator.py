@@ -71,7 +71,6 @@ def collect_inventory(
     )
 
 
-@staticmethod
 def extract_text(data: object) -> Optional[str]:
     """Pull text out of the response shapes the endpoint may use."""
     if isinstance(data, str):
