@@ -1,0 +1,51 @@
+# retelldb tag taxonomy
+#
+# copy to taxonomy.yaml, review it, then point RETELLDB_TAXONOMY_PATH at it.
+# this file is configuration, not code: nothing here aliases anything until the
+# pipeline is given the file.
+#
+# rules the wrangler keeps:
+#   - a raw tag is never rewritten. it stays on the node as provenance.
+#   - an alias that appears under two canonical tags is ambiguous and resolves to
+#     nothing. remove one, or leave it uncovered on purpose.
+#   - parents are broader tags. they become parent_of edges with weight 1.0, so a
+#     child tag can reach sibling content one hop further out.
+#   - related weights are explicit associations, never similarity scores.
+
+tags:
+  - name: authentication
+    aliases:
+      - {alias: auth, confidence: 0.95}
+      - {alias: login, confidence: 0.95}
+      - {alias: signin, confidence: 0.9}
+    related: {tokens: 0.8, errors: 0.5}
+
+  - name: tokens
+    aliases:
+      - {alias: token, confidence: 0.98}
+      - {alias: refresh token, confidence: 0.9}
+    parents: [authentication]
+    related: {authentication: 0.8}
+
+  - name: sdk
+    aliases:
+      - {alias: client, confidence: 0.8}
+      - {alias: library, confidence: 0.75}
+    related: {quickstart: 0.7}
+
+  - name: quickstart
+    aliases:
+      - {alias: getting started, confidence: 0.95}
+      - {alias: setup, confidence: 0.85}
+
+  - name: errors
+    aliases:
+      - {alias: error, confidence: 0.98}
+      - {alias: troubleshooting, confidence: 0.85}
+    related: {authentication: 0.5}
+
+  - name: billing
+    aliases:
+      - {alias: subscription, confidence: 0.95}
+      - {alias: invoice, confidence: 0.9}
+      - {alias: pricing, confidence: 0.85}

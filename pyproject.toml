@@ -4,8 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "retelldb"
-version = "0.1.0"
+version = "0.2.0"
 description = "A graph-powered retrieval layer for agents that actually understand your docs"
+license = {text = "MIT"}
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+keywords = ["retrieval", "graph", "rag", "documentation", "tag-wrangling"]
 readme = "readme.md"
 requires-python = ">=3.9"
 dependencies = [
@@ -28,6 +35,10 @@ dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/retelldb/retelldb"
+Issues = "https://github.com/retelldb/retelldb/issues"
 
 [project.scripts]
 retelldb = "retelldb.cli:main"

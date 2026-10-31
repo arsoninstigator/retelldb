@@ -42,6 +42,58 @@ when an agent queries retelldb, it can traverse that structure rather than just 
 
 ---
 
+---
+
+## the tag wrangler
+
+tags are the part of retrieval that decides everything downstream, so retelldb treats
+them as a typed, auditable ontology instead of string metadata.
+
+**canonical tags, aliases, and provenance.** a raw tag is never rewritten. an observed
+`dev` or `coding` stays exactly as it was on the node, and the resolution is written to
+the graph as an `alias_of` edge from the alias tag node to its canonical tag node, weighted
+by confidence. you can always answer "what did the human actually type, and what did we
+decide it meant".
+
+**ambiguity resolves to nothing.** if an alias is configured for two canonical tags, it
+resolves to neither and is reported as ambiguous. the wrangler does not guess from context
+at ingest time.
+
+**perspective is a retrieval parameter.** nodes can be stamped with personas and a
+sensitivity. a query carries `persona`, and scope is fail-closed: no declared persona means
+persona-scoped content is not visible, private content is only visible to its own persona,
+and everything withheld comes back in `blocked` with a reason.
+
+**weighted traversal, not nearest neighbour.** every edge carries an explicit weight. a
+walk multiplies them along the path, prunes edges below a floor, refuses `blocks` edges, and
+cannot loop. the result includes the path that pulled each node in, with its weights.
+
+**confidence tiers and structured doubt.** the engine returns a total confidence, the tier
+it falls in (`high`, `uncertain`, `needs_clarification`, `unavailable`), the components that
+dampened it, and the next action the agent should take. a weak match is never dressed up as
+a confident answer.
+
+**citations you can check.** every node carries source references (path, line range, content
+type). the engine resolves them into citations, and verifies the cited span against the
+source text when it is available.
+
+### generating the ontology
+
+hand writing aliases does not scale, so the taxonomy can be generated from the tags a corpus
+actually produces, using a dataset and model provider (Adaption Labs by default):
+
+```bash
+export ADAPTIONLABS_API_KEY=...
+retelldb taxonomy generate ./docs --out taxonomy.yaml --dry-run   # inspect the prompt first
+retelldb taxonomy generate ./docs --out taxonomy.yaml
+retelldb taxonomy validate taxonomy.yaml
+export RETELLDB_TAXONOMY_PATH=taxonomy.yaml
+```
+
+generation is honest by construction: every observed raw tag must come back classified, tags
+left uncovered are reported, a failed model call fails the command instead of writing a
+partial ontology, and nothing is aliased until you point the config at the reviewed file.
+
 ## quickstart
 
 ### 1. Installation
@@ -89,6 +141,14 @@ for item in result.nodes:
 # Vague query -> routes to Latent Associative Vector Fallback
 vague_result = client.query("my credentials failed to connect")
 print(vague_result.retrieval_path)  # vector_fallback
+
+# Perspective, confidence, and citations
+scoped = client.query("what should i work on", persona="student")
+print(scoped.confidence.tier)        # high | uncertain | needs_clarification | unavailable
+print(scoped.confidence.next_actions)  # what to do when the tier is not "high"
+print(scoped.blocked)                # what this perspective could not see, and why
+for citation in scoped.citations:
+    print(citation.location(), citation.verified)  # docs/auth.md:6-7 True/False/None
 ```
 
 ### 3. Hosted API & Server
@@ -168,10 +228,20 @@ flowchart TD
 
 ## known issues & limitations
 
-- **tag traversal ranker / auth cluster overlap**: In the developer graph, multi-tag overlap weighting does not yet consistently outrank hop proximity for densely cross-linked documents (specifically the authentication cluster). High-signal queries can retrieve hop-1 neighbors (such as `Authentication Architecture`) ahead of specific target sub-nodes when multiple matched tags connect to both. This produces three dev-graph misses (`dev_auth_token_refresh`, `dev_401_error`, `dev_ingest_example`), yielding an evaluation top-k hit rate of **76.9%** (10/13 queries passing) on both the `memory` and `falkordb` backends with 100.0% retrieval path and 100.0% audience routing accuracy (clearing the >=70% gate).
-- **traversal scoring equivalence**: Memory BFS and FalkorDB Cypher path traversal should be scoring-equivalent; right now hop accounting and tie-breaking details between live Cypher traversal and in-memory BFS require calibration in round 3.
-
----
+- **one eval miss left**: the golden query `dev_ingest_example` retrieves the example node
+  (`Ingesting a Document - Example 1 (python)`) rather than its parent section, which the
+  golden set expects by title. evaluation top-k hit rate is **92.3%** (12/13) on the
+  `memory` backend, with 100.0% retrieval path and 100.0% audience routing accuracy. the
+  known issue from the previous round (multi-tag overlap losing to hop proximity in the auth
+  cluster) is fixed by weighted traversal plus duplicate-title collapsing.
+- **generated ontologies need review**: `retelldb taxonomy generate` produces a taxonomy
+  file, not a graph mutation. alias confidence is a model judgement, and the file is meant to
+  be read before `RETELLDB_TAXONOMY_PATH` points at it.
+- **citation verification needs source text**: without a `SourceVerifier` or a live file
+  resolver, citations come back with `verified: null` rather than a claim.
+- **persona coverage**: personas are only enforced where content was stamped with them at
+  ingest. unstamped content is shared by default, which is a deliberate default but does mean
+  a caller must decide visibility when it writes.
 
 ## v2
 

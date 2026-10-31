@@ -112,3 +112,34 @@ the agent does not wait for a clean, complete question. it starts traversing as 
 ```
 
 `audience` is optional if you want the classifier to decide. `max_hops` controls how deep the graph traversal goes. `include_edges` returns the relationship edges alongside nodes so the agent can explain its reasoning.
+
+---
+
+## what changed in the result
+
+the result shape grew the fields an agent needs to behave honestly. everything is additive;
+`nodes`, `edges`, `retrieval_path` and `confidence_signals` still work exactly as before.
+
+| field | what it is for |
+|---|---|
+| `confidence.tier` | `high`, `uncertain`, `needs_clarification`, `unavailable` |
+| `confidence.components` | which signal was weak: `hierarchy_decay`, `path_weight`, `persona_relevance`, `source_confidence` |
+| `confidence.dominant_dampener` | the single weakest component, so the caveat can be specific |
+| `confidence.next_actions` | `answer_directly`, `answer_with_caveat`, `ask_clarifying_question`, `state_unavailable`, plus recovery actions such as `switch_persona:<id>` |
+| `paths` | the weighted walk that pulled each node in: node ids, edge ids, per-edge weights, chain weight, hops |
+| `tag_resolutions` | how each matched tag resolved, including `alias` with its canonical tag |
+| `blocked` | nodes withheld by the active perspective, with a reason and the personas that would expose them |
+| `citations` | `path:line-line` references with content type, excerpt, and `verified` (true, false, or null when the source text is unavailable) |
+
+### how to behave at each tier
+
+- **high**: answer directly, cite the citations, no hedging.
+- **uncertain**: answer, but say which component was weak. `dominant_dampener` tells you
+  whether to mention age, perspective, traversal distance or source quality.
+- **needs_clarification**: ask a question. do not guess between perspectives.
+- **unavailable**: refuse, then offer the action in `next_actions`. if `blocked` names other
+  personas, offer to switch; do not paraphrase blocked content or hint at it.
+
+blocked content is not context. it never becomes a sentence, a hedge, or an omission that
+implies you know. if `blocked` is non-empty and the tier is not `high`, say what you cannot
+see and what would let you see it.

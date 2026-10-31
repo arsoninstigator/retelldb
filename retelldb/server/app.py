@@ -84,7 +84,9 @@ def create_app(config: RetellDBConfig = default_config) -> FastAPI:
                 audience=request.audience,
                 title=request.title,
                 source_uri=request.source_uri,
-                metadata=request.metadata
+                metadata=request.metadata,
+                personas=request.personas,
+                sensitivity=request.sensitivity,
             )
             return resp
         except Exception as e:

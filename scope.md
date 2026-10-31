@@ -24,6 +24,26 @@ the decision of which retrieval strategy to use is internal to retelldb. agents 
 **multi-format ingestion**
 markdown, mdx, openapi / asyncapi specs, notion exports, html docs. everything normalizes to the same internal node shape before it hits the graph.
 
+**tag ontology with provenance**
+canonical tags, aliases with confidence, declared hierarchy and associations. raw tags are
+preserved as provenance, and ambiguity resolves to nothing rather than a guess.
+
+**perspective scoping**
+personas and sensitivity as retrieval parameters, fail-closed, with every withheld node
+reported and reasoned.
+
+**weighted traversal and confidence tiers**
+explicit edge weights, blocked edges, cycle termination, and a confidence verdict with
+structured doubt and a next action.
+
+**source citations**
+path plus line range plus content type per node, with integrity checking against the source
+when it is available.
+
+**taxonomy generation**
+build the ontology from the tags a corpus actually produced, reviewed as a file before it is
+used.
+
 **open source library + hosted api**
 self-host the full stack or hit the hosted api. both are supported from the start.
 

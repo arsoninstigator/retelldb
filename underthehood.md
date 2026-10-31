@@ -171,3 +171,63 @@ this works well with a graph because traversal is incremental. you are following
 | final answer generation (agent layer) | your choice | not retelldb's job |
 
 all model calls go through litellm. changing a model is a config key swap, not a code change.
+
+---
+
+## the tag wrangler at ingest
+
+tags arrive messy and leave canonical, without losing what the human wrote.
+
+```mermaid
+flowchart LR
+    A[raw tags on a node] --> B[taxonomy.resolve]
+    B -->|exact| C[canonical tag node]
+    B -->|alias| D[alias tag node]
+    D -->|alias_of weight=confidence| C
+    C -->|tagged_as weight=confidence| E[content node]
+    B -->|ambiguous| F[raw stays its own canonical, reported]
+```
+
+- `node.tags` keeps the raw strings. resolution never overwrites provenance.
+- the alias tag node points at its canonical tag with `alias_of`, so a query that hits the
+  alias still reaches the canonical content, just damped by the alias confidence.
+- declared hierarchy becomes `parent_of` edges (weight 1.0) between tag nodes, and declared
+  associations become `related` edges at their configured weights. those weights are data,
+  not vector distances.
+- every content node gets `sources` entries: path, line range, content type, excerpt.
+  the markdown normalizer computes real line numbers, frontmatter included.
+
+## the walk
+
+retrieval is a best-first walk over explicit weights, implemented once in python so both
+backends score identically (memory and falkordb previously diverged here).
+
+- chain weight = product of edge weights along the path
+- edges below `RETELLDB_MIN_EDGE_WEIGHT` (default 0.05) are pruned before the hop budget
+  is spent
+- `blocks` edges, or any edge with `blocks: true`, are never walked
+- a path never revisits a node, so cycles terminate
+- the best path per node wins, and the winning path ships with the result
+
+node score = `tag_confidence × hop_decay^(hops-1) × path_weight × persona_relevance × tag_overlap_boost`
+
+## the confidence math
+
+`total = base_signal × Π damped(component)`, where each component is in [0, 1] and
+
+```
+damped(d) = floor + (1 - floor) × d      floor = 0.45 by default
+```
+
+dampeners multiply so weak signals compound, and the floor keeps one weak component from
+zeroing an otherwise solid match. tiers:
+
+| tier | total | behaviour |
+|---|---|---|
+| high | >= 0.75 | answer directly |
+| uncertain | 0.45 - 0.74 | answer with a specific caveat |
+| needs_clarification | 0.25 - 0.44 | ask, do not guess |
+| unavailable | < 0.25 | refuse, offer the next action |
+
+the same breakdown reports `dominant_dampener` (the weakest component) and `next_actions`
+(what the agent should do about it), so structured doubt is data rather than prose.

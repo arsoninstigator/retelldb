@@ -344,6 +344,12 @@ def main():
         "--top-k", type=int, default=5, help="Number of nodes to retrieve per query."
     )
     parser.add_argument(
+        "--fail-under",
+        type=float,
+        default=0.70,
+        help="Exit non-zero when the top-k hit rate is below this fraction.",
+    )
+    parser.add_argument(
         "--output",
         default=None,
         help="Path to write the markdown report (default: print to stdout).",
@@ -416,8 +422,8 @@ def main():
         f"p95={metrics['latency_p95_ms']}ms"
     )
 
-    # Exit with non-zero if more than 30% failures
-    if metrics["top_k_hit_rate"] < 0.70:
+    # Exit with non-zero when the hit rate falls under the gate
+    if metrics["top_k_hit_rate"] < args.fail_under:
         print("\n⚠ Top-k hit rate below 70% threshold — eval FAILED", file=sys.stderr)
         sys.exit(1)
 
