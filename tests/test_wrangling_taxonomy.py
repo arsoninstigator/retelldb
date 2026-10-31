@@ -9,8 +9,8 @@ import json
 
 import pytest
 
+from retelldb.buildtime.adaption import AdaptionTransport
 from retelldb.wrangling.generator import (
-    AdaptionTransport,
     GenerationError,
     build_prompt,
     collect_inventory,
@@ -192,3 +192,56 @@ def test_prompt_states_the_no_drop_rule():
     prompt = build_prompt(["dev", "billing"])
     assert "do not drop any" in prompt
     assert "ambiguous" in prompt
+
+
+# ===========================================================================
+# BUILD-TIME ONLY CONTAINMENT
+# ===========================================================================
+
+
+class TestBuildTimeContainment:
+    """
+    The provider is a build dependency, never a runtime one. These tests hold the line
+    in the two places it can slip: an import that drags the package in, and a production
+    deployment that would quietly make a paid network call.
+    """
+
+    def test_transport_refuses_to_initialise_in_production(self, monkeypatch):
+        from retelldb.buildtime.adaption import assert_build_time
+
+        for name, value in (
+            ("RETELLDB_DEPLOYMENT", "production"),
+            ("RETELLDB_ENV", "prod"),
+            ("ENVIRONMENT", "live"),
+        ):
+            monkeypatch.delenv("RETELLDB_DEPLOYMENT", raising=False)
+            monkeypatch.delenv("RETELLDB_ENV", raising=False)
+            monkeypatch.delenv("DEPLOYMENT_ENV", raising=False)
+            monkeypatch.delenv("ENVIRONMENT", raising=False)
+            monkeypatch.setenv(name, value)
+            with pytest.raises(RuntimeError, match="build-time only"):
+                assert_build_time()
+            with pytest.raises(RuntimeError, match="build-time only"):
+                AdaptionTransport(api_key="pt_test")
+
+    def test_transport_completes_and_refuses_if_the_environment_changes_under_it(self, monkeypatch):
+        monkeypatch.delenv("ENVIRONMENT", raising=False)
+        transport = AdaptionTransport(api_key="pt_test")
+        assert transport.available() is True
+
+        monkeypatch.setenv("RETELLDB_DEPLOYMENT", "production")
+        with pytest.raises(RuntimeError, match="build-time only"):
+            transport.complete("system", "prompt")
+
+    def test_runtime_import_never_reaches_the_buildtime_package(self):
+        import subprocess
+        import sys
+
+        probe = (
+            "import sys, retelldb, retelldb.client, retelldb.wrangling\n"
+            "leaked = [m for m in sys.modules if m.startswith('retelldb.buildtime')]\n"
+            "print(leaked)\n"
+            "raise SystemExit(1 if leaked else 0)"
+        )
+        result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True)
+        assert result.returncode == 0, f"runtime import pulled build-time code in: {result.stdout}{result.stderr}"

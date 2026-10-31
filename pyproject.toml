@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "retelldb"
-version = "0.2.1"
+version = "0.2.2"
 description = "A graph-powered retrieval layer for agents that actually understand your docs"
 license = {text = "MIT"}
 classifiers = [

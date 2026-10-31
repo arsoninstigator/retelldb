@@ -18,7 +18,7 @@ Two rules keep this honest:
 import json
 import logging
 import re
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Protocol, Sequence, Tuple
 
 import httpx
 from pydantic import BaseModel, Field
@@ -27,10 +27,17 @@ from retelldb.wrangling.taxonomy import AliasRule, CanonicalTag, TagTaxonomy, no
 
 logger = logging.getLogger("retelldb.wrangling.generator")
 
-DEFAULT_BASE_URL = "https://api.adaptionlabs.ai"
 DEFAULT_TIMEOUT = 60.0
 DEFAULT_BATCH_SIZE = 60
 MAX_SNIPPET_CHARS = 400
+
+
+class GeneratorTransport(Protocol):
+    """Text in, text out. Every build-time provider satisfies this and nothing else."""
+
+    def available(self) -> bool: ...
+
+    def complete(self, system: str, prompt: str) -> Optional[str]: ...
 
 
 class GenerationError(RuntimeError):
@@ -62,103 +69,37 @@ def collect_inventory(
     )
 
 
-class AdaptionTransport:
-    """
-    Minimal client for Adaption's hosted model-response endpoint.
-
-    The transport's only job is text in, text out. Any HTTP or shape surprise becomes
-    a logged None so the generator can report failure instead of guessing.
-    """
-
-    def __init__(
-        self,
-        api_key: Optional[str] = None,
-        base_url: str = DEFAULT_BASE_URL,
-        model: Optional[str] = None,
-        timeout: float = DEFAULT_TIMEOUT,
-    ):
-        import os
-
-        self.api_key = api_key or os.getenv("ADAPTIONLABS_API_KEY") or os.getenv(
-            "ADAPTION_LABS_API_KEY"
-        )
-        self.base_url = base_url.rstrip("/")
-        self.model = model
-        self.timeout = timeout
-
-    def available(self) -> bool:
-        return bool(self.api_key)
-
-    def complete(self, system: str, prompt: str) -> Optional[str]:
-        if not self.api_key:
-            logger.warning("No Adaption Labs API key configured; cannot generate a taxonomy.")
-            return None
-
-        payload: Dict[str, object] = {
-            "input": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": prompt},
-            ]
-        }
-        if self.model:
-            payload["model"] = self.model
-
-        try:
-            response = httpx.post(
-                f"{self.base_url}/api/v1/responses",
-                json=payload,
-                headers={"Authorization": f"Bearer {self.api_key}"},
-                timeout=self.timeout,
-            )
-        except Exception as exc:
-            logger.error("Adaption request failed: %s", exc)
-            return None
-
-        if response.status_code >= 400:
-            logger.error(
-                "Adaption response error %s: %s",
-                response.status_code,
-                response.text[:300],
-            )
-            return None
-
-        try:
-            return self._extract_text(response.json())
-        except Exception as exc:
-            logger.error("Adaption response was not JSON: %s", exc)
-            return None
-
-    @staticmethod
-    def _extract_text(data: object) -> Optional[str]:
-        """Pull text out of the response shapes the endpoint may use."""
-        if isinstance(data, str):
-            return data
-        if not isinstance(data, dict):
-            return None
-
-        for key in ("output_text", "text", "content"):
-            value = data.get(key)
-            if isinstance(value, str) and value.strip():
-                return value
-
-        output = data.get("output")
-        if isinstance(output, list):
-            parts: List[str] = []
-            for item in output:
-                if isinstance(item, dict):
-                    for entry in item.get("content", []) or []:
-                        if isinstance(entry, dict) and isinstance(entry.get("text"), str):
-                            parts.append(entry["text"])
-            if parts:
-                return "\n".join(parts)
-
-        choices = data.get("choices")
-        if isinstance(choices, list) and choices:
-            message = choices[0].get("message") if isinstance(choices[0], dict) else None
-            if isinstance(message, dict) and isinstance(message.get("content"), str):
-                return message["content"]
-
+@staticmethod
+def extract_text(data: object) -> Optional[str]:
+    """Pull text out of the response shapes the endpoint may use."""
+    if isinstance(data, str):
+        return data
+    if not isinstance(data, dict):
         return None
+
+    for key in ("output_text", "text", "content"):
+        value = data.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+
+    output = data.get("output")
+    if isinstance(output, list):
+        parts: List[str] = []
+        for item in output:
+            if isinstance(item, dict):
+                for entry in item.get("content", []) or []:
+                    if isinstance(entry, dict) and isinstance(entry.get("text"), str):
+                        parts.append(entry["text"])
+        if parts:
+            return "\n".join(parts)
+
+    choices = data.get("choices")
+    if isinstance(choices, list) and choices:
+        message = choices[0].get("message") if isinstance(choices[0], dict) else None
+        if isinstance(message, dict) and isinstance(message.get("content"), str):
+            return message["content"]
+
+    return None
 
 
 class OpenAICompatTransport:
@@ -229,7 +170,7 @@ class OpenAICompatTransport:
             )
             return None
         try:
-            return AdaptionTransport._extract_text(response.json())
+            return extract_text(response.json())
         except Exception as exc:
             logger.error("Chat completion response was not JSON: %s", exc)
             return None
@@ -385,7 +326,7 @@ def reconcile(taxonomy: TagTaxonomy, inventory: TagInventory) -> Dict[str, objec
 
 def generate_taxonomy(
     inventory: TagInventory,
-    transport: AdaptionTransport,
+    transport: "GeneratorTransport",
     batch_size: int = DEFAULT_BATCH_SIZE,
 ) -> Tuple[TagTaxonomy, Dict[str, object]]:
     """
@@ -398,7 +339,8 @@ def generate_taxonomy(
         raise GenerationError("no tags to generate from")
     if not transport.available():
         raise GenerationError(
-            "no Adaption Labs API key configured (set ADAPTIONLABS_API_KEY)"
+            "the configured generator transport has no credentials "
+            f"({type(transport).__name__})"
         )
 
     merged: Dict[str, CanonicalTag] = {}

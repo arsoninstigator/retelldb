@@ -92,7 +92,24 @@ export RETELLDB_TAXONOMY_PATH=taxonomy.yaml
 
 Adaption Labs is the default provider. `--provider openai-compat` points the same
 generator at any chat-completions endpoint (`--base-url`, `--model`), which is useful when
-the primary provider is unavailable.
+the primary provider is unavailable. `ADAPTIONLABS_BASE_URL` overrides the endpoint.
+
+### the provider is a build dependency, never a runtime one
+
+generation runs during a build and its output is a reviewed `taxonomy.yaml` that ships with
+the release. nothing in the retrieval path calls a model provider, and the package layout
+makes that structural rather than conventional:
+
+- the provider lives in `retelldb/buildtime/`, which the runtime never imports. a test boots a
+  fresh interpreter, imports `retelldb`, `retelldb.client` and `retelldb.wrangling`, and fails if
+  anything under `retelldb.buildtime` loaded.
+- `retelldb/wrangling/generator.py` is provider agnostic: it takes any object with
+  `available()` and `complete(system, prompt)`, so the generator can be tested with a stub and
+  the ontology logic carries no vendor.
+- `assert_build_time()` runs on construction and on every completion. if
+  `RETELLDB_DEPLOYMENT`, `RETELLDB_ENV`, `DEPLOYMENT_ENV` or `ENVIRONMENT` says `production`,
+  `prod` or `live`, the transport raises instead of making the call. there is no override flag
+  on purpose.
 
 generation is honest by construction: every observed raw tag must come back classified, tags
 left uncovered are reported, a failed model call fails the command instead of writing a

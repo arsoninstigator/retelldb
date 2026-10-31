@@ -1,5 +1,21 @@
 # changelog
 
+## 0.2.2
+
+### changed
+
+- the model provider moved to `retelldb/buildtime/`, a package the runtime never imports.
+  generation is a build step whose output is a reviewed `taxonomy.yaml`, so a production
+  deployment has no path to a provider call. a test boots a clean interpreter and fails if the
+  runtime import graph pulls `retelldb.buildtime` in.
+- `assert_build_time()` guards construction and every completion: a production deployment
+  signal (`RETELLDB_DEPLOYMENT`, `RETELLDB_ENV`, `DEPLOYMENT_ENV`, `ENVIRONMENT` set to
+  `production`, `prod` or `live`) raises instead of calling out. no override flag.
+- `retelldb/wrangling/generator.py` is provider agnostic and takes any object with
+  `available()` and `complete(system, prompt)`, so the ontology logic carries no vendor.
+- `ADAPTIONLABS_BASE_URL` overrides the endpoint; the base url is no longer hardcoded in the
+  cli.
+
 ## 0.2.1
 
 ### fixed

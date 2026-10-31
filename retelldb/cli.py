@@ -136,7 +136,6 @@ def taxonomy_generate(paths, audience, out, provider, model, base_url, batch_siz
     you point the config at the written file.
     """
     from retelldb.wrangling.generator import (
-        AdaptionTransport,
         GenerationError,
         build_prompt,
         collect_inventory,
@@ -188,9 +187,10 @@ def taxonomy_generate(paths, audience, out, provider, model, base_url, batch_siz
             model=model or "Qwen/Qwen2.5-72B-Instruct",
         )
     else:
-        transport = AdaptionTransport(
-            base_url=base_url or "https://api.adaptionlabs.ai", model=model
-        )
+        # build-time only: the transport itself refuses to run in a production deployment
+        from retelldb.buildtime.adaption import AdaptionTransport
+
+        transport = AdaptionTransport(base_url=base_url, model=model)
     try:
         generated, report = generate_taxonomy(
             inventory, transport, batch_size=batch_size
