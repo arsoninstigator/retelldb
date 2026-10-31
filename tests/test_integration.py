@@ -47,7 +47,7 @@ def pytest_configure(config):
 def _make_storage_config(**overrides):
     from retelldb.config import StorageConfig
 
-    return StorageConfig(
+    settings = dict(
         backend="falkordb",
         falkordb_host=FALKORDB_HOST,
         falkordb_port=FALKORDB_PORT,
@@ -56,8 +56,11 @@ def _make_storage_config(**overrides):
         embedding_dimension=4,  # tiny dim for tests — avoids real embedding calls
         dev_graph_name=TEST_GRAPH_DEV,
         user_graph_name=TEST_GRAPH_USER,
-        **overrides,
     )
+    # overrides are merged, not splatted alongside the defaults, so a caller can replace
+    # pg_dsn without a duplicate keyword error
+    settings.update(overrides)
+    return StorageConfig(**settings)
 
 
 # ---------------------------------------------------------------------------
@@ -595,9 +598,10 @@ class TestFreshDatabaseInit:
             pytest.skip("postgres not reachable — is `docker compose up` running?")
 
         fresh_db = "retelldb_init_order_test"
-        with admin:
-            admin.execute(f'DROP DATABASE IF EXISTS "{fresh_db}" WITH (FORCE)')
-            admin.execute(f'CREATE DATABASE "{fresh_db}"')
+        # psycopg3 closes a connection when it leaves a `with` block, so the admin handle
+        # stays open until the end of the test instead
+        admin.execute(f'DROP DATABASE IF EXISTS "{fresh_db}" WITH (FORCE)')
+        admin.execute(f'CREATE DATABASE "{fresh_db}"')
 
         try:
             store = PGVectorStore(
@@ -611,5 +615,7 @@ class TestFreshDatabaseInit:
             hits = store.similarity_search(TEST_GRAPH_DEV, [0.2, 0.2, 0.2, 0.2], top_k=1)
             assert [node_id for node_id, _score in hits] == ["fresh-init-001"]
         finally:
-            with admin:
+            try:
                 admin.execute(f'DROP DATABASE IF EXISTS "{fresh_db}" WITH (FORCE)')
+            finally:
+                admin.close()
