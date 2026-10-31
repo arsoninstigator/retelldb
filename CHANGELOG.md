@@ -1,5 +1,24 @@
 # changelog
 
+## 0.2.1
+
+### fixed
+
+- pgvector: the store registered its client adapter before creating the schema, so against a
+  fresh database every call raised `vector type not found`, the error was swallowed, and
+  pgvector quietly served reads and writes from the in-memory fallback. schema first,
+  registration second. found by ci, covered by a regression test that builds and drops its own
+  database.
+- test harness: config overrides are merged instead of splatted next to defaults, so a test can
+  point `pg_dsn` at another database.
+
+### added
+
+- ci runs the live-backend suite on tenki runners: docker-compose falkordb and pgvector inside
+  the job, 24 integration tests, and a check that fails the build if any of them skip instead
+  of running.
+- unit job deselects integration markers, which previously collected as skips.
+
 ## 0.2.0
 
 the tag wrangler. retrieval semantics from the tag-wrangling research are now code, not prose.

@@ -235,7 +235,15 @@ flowchart TD
 `.github/workflows/ci.yml` has two jobs. `test` runs the unit suite on the supported python
 floor and ceiling, then gates on the eval hit rate. `integration` brings falkordb and pgvector
 up from `docker-compose.yml` and runs the live-backend suite, which is why it only runs on
-`main` and manual dispatch. Pull requests run `test` only. jobs run on **tenki runners** (`tenki-standard-small-2c-4g`),
+`main` and manual dispatch. Pull requests run `test` only.
+
+the integration job is honest by construction: it installs the client libraries (the stores
+silently fall back to memory without them) and fails on any skip, so a live test can never
+quietly turn into a green build. it covers 24 tests across falkordb and pgvector, including
+audience isolation and a fresh-database regression.
+
+locally, `pytest -q -m "not integration"` runs the hermetic unit suite; the integration suite
+needs `docker compose up -d` first. jobs run on **tenki runners** (`tenki-standard-small-2c-4g`),
 which are a drop-in replacement for github-hosted runners: only the `runs-on` value differs.
 
 one-time setup, done once per owner rather than per push: install the tenki github app for the
