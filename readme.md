@@ -232,8 +232,10 @@ flowchart TD
 
 ## ci
 
-`.github/workflows/ci.yml` runs the unit suite on the supported python floor and ceiling,
-then gates on the eval hit rate. jobs run on **tenki runners** (`tenki-standard-small-2c-4g`),
+`.github/workflows/ci.yml` has two jobs. `test` runs the unit suite on the supported python
+floor and ceiling, then gates on the eval hit rate. `integration` brings falkordb and pgvector
+up from `docker-compose.yml` and runs the live-backend suite, which is why it only runs on
+`main` and manual dispatch. Pull requests run `test` only. jobs run on **tenki runners** (`tenki-standard-small-2c-4g`),
 which are a drop-in replacement for github-hosted runners: only the `runs-on` value differs.
 
 one-time setup, done once per owner rather than per push: install the tenki github app for the
