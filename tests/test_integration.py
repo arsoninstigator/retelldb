@@ -580,18 +580,36 @@ class TestMemoryFallback:
 class TestFreshDatabaseInit:
     """
     A brand new database has no vector type until the extension is created, so the store
-    must run its schema first and register the client adapter second. Getting this order
-    backwards made every pgvector call fall back to memory against a perfectly healthy
-    Postgres.
+    must run its schema first and register the client adapter second. Getting the order
+    backwards made every pgvector call fall back to memory against a healthy Postgres.
     """
 
     def test_store_connects_on_a_database_without_the_extension(self):
+        psycopg = pytest.importorskip("psycopg")
         from retelldb.storage.pgvector_store import PGVectorStore
 
-        cfg = _make_storage_config(pg_dsn=PG_DSN)
-        store = PGVectorStore(config=cfg)
-        assert store._connected is True, "fresh database must not fall back to memory"
+        base, _ = PG_DSN.rsplit("/", 1)
+        try:
+            admin = psycopg.connect(f"{base}/postgres", autocommit=True, connect_timeout=3)
+        except Exception:
+            pytest.skip("postgres not reachable — is `docker compose up` running?")
 
-        store.add_embedding(TEST_GRAPH_DEV, "fresh-init-001", [0.2, 0.2, 0.2, 0.2])
-        hits = store.similarity_search(TEST_GRAPH_DEV, [0.2, 0.2, 0.2, 0.2], k=1)
-        assert [h.node_id for h in hits] == ["fresh-init-001"]
+        fresh_db = "retelldb_init_order_test"
+        with admin:
+            admin.execute(f'DROP DATABASE IF EXISTS "{fresh_db}" WITH (FORCE)')
+            admin.execute(f'CREATE DATABASE "{fresh_db}"')
+
+        try:
+            store = PGVectorStore(
+                config=_make_storage_config(pg_dsn=f"{base}/{fresh_db}")
+            )
+            assert store._connected is True, (
+                "a database without the vector extension yet must not fall back to memory"
+            )
+
+            store.add_embedding(TEST_GRAPH_DEV, "fresh-init-001", [0.2, 0.2, 0.2, 0.2])
+            hits = store.similarity_search(TEST_GRAPH_DEV, [0.2, 0.2, 0.2, 0.2], top_k=1)
+            assert [node_id for node_id, _score in hits] == ["fresh-init-001"]
+        finally:
+            with admin:
+                admin.execute(f'DROP DATABASE IF EXISTS "{fresh_db}" WITH (FORCE)')
