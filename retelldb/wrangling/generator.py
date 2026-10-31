@@ -161,6 +161,80 @@ class AdaptionTransport:
         return None
 
 
+class OpenAICompatTransport:
+    """
+    Chat-completions transport for any OpenAI-shaped endpoint.
+
+    Kept separate from the Adaption transport because the two have different auth and
+    payload shapes. Used as an alternate rail when the primary provider is unavailable;
+    a dead provider should not block generation when another one is configured.
+    """
+
+    BROWSER_UA = (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/128.0 Safari/537.36"
+    )
+
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        base_url: str = "https://api.featherless.ai/v1",
+        model: str = "Qwen/Qwen2.5-72B-Instruct",
+        timeout: float = DEFAULT_TIMEOUT,
+        api_key_env: Sequence[str] = ("FEATHERLESS_API_KEY_2", "FEATHERLESS_API_KEY"),
+    ):
+        import os
+
+        self.api_key = api_key or next(
+            (os.getenv(name) for name in api_key_env if os.getenv(name)), None
+        )
+        self.base_url = base_url.rstrip("/")
+        self.model = model
+        self.timeout = timeout
+
+    def available(self) -> bool:
+        return bool(self.api_key)
+
+    def complete(self, system: str, prompt: str) -> Optional[str]:
+        if not self.api_key:
+            logger.warning("No API key for the OpenAI-compatible transport.")
+            return None
+        try:
+            response = httpx.post(
+                f"{self.base_url}/chat/completions",
+                json={
+                    "model": self.model,
+                    "messages": [
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "temperature": 0.1,
+                    "max_tokens": 2000,
+                },
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "User-Agent": self.BROWSER_UA,
+                },
+                timeout=self.timeout,
+            )
+        except Exception as exc:
+            logger.error("Chat completion request failed: %s", exc)
+            return None
+
+        if response.status_code >= 400:
+            logger.error(
+                "Chat completion error %s: %s",
+                response.status_code,
+                response.text[:300],
+            )
+            return None
+        try:
+            return AdaptionTransport._extract_text(response.json())
+        except Exception as exc:
+            logger.error("Chat completion response was not JSON: %s", exc)
+            return None
+
+
 SYSTEM_PROMPT = (
     "You maintain a canonical tag ontology for a documentation retrieval graph. "
     "You receive raw tags that humans actually typed. You return strict JSON only, "

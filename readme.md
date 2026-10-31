@@ -90,6 +90,10 @@ retelldb taxonomy validate taxonomy.yaml
 export RETELLDB_TAXONOMY_PATH=taxonomy.yaml
 ```
 
+Adaption Labs is the default provider. `--provider openai-compat` points the same
+generator at any chat-completions endpoint (`--base-url`, `--model`), which is useful when
+the primary provider is unavailable.
+
 generation is honest by construction: every observed raw tag must come back classified, tags
 left uncovered are reported, a failed model call fails the command instead of writing a
 partial ontology, and nothing is aliased until you point the config at the reviewed file.

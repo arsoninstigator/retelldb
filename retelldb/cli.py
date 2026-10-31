@@ -108,8 +108,6 @@ def status(url: str):
     click.echo(json.dumps(stat.model_dump(), indent=2))
 
 
-if __name__ == "__main__":
-    main()
 
 
 @main.group()
@@ -123,11 +121,13 @@ def taxonomy():
 @click.option("--audience", "-a", default="developer", type=click.Choice(["developer", "user"]))
 @click.option("--out", "-o", default="taxonomy.yaml", type=click.Path(path_type=Path),
               help="Where to write the reviewed taxonomy.")
+@click.option("--provider", default="adaption", type=click.Choice(["adaption", "openai-compat"]),
+              help="Where the taxonomy is generated. openai-compat covers any chat-completions endpoint.")
 @click.option("--model", default=None, help="Generator model id, if the provider needs one.")
 @click.option("--base-url", default=None, help="Override the Adaption Labs API base URL.")
 @click.option("--batch-size", default=60, type=int, help="Tags per generation request.")
 @click.option("--dry-run", is_flag=True, help="Collect tags and print the prompt; call nothing.")
-def taxonomy_generate(paths, audience, out, model, base_url, batch_size, dry_run):
+def taxonomy_generate(paths, audience, out, provider, model, base_url, batch_size, dry_run):
     """
     Generate a tag taxonomy from the raw tags in a set of documents.
 
@@ -145,7 +145,16 @@ def taxonomy_generate(paths, audience, out, model, base_url, batch_size, dry_run
     )
 
     if not paths:
-        raise click.UsageError("give at least one document path")
+        raise click.UsageError("give at least one document path or directory")
+
+    documents = []
+    for path in paths:
+        if path.is_dir():
+            documents.extend(sorted(p for p in path.rglob("*") if p.suffix in (".md", ".mdx")))
+        else:
+            documents.append(path)
+    if not documents:
+        raise click.UsageError("no markdown documents found in the given paths")
 
     client = RetellDB(use_memory=True)
     graph_name = (
@@ -154,7 +163,7 @@ def taxonomy_generate(paths, audience, out, model, base_url, batch_size, dry_run
         else client.config.storage.user_graph_name
     )
 
-    for path in paths:
+    for path in documents:
         client.ingest(
             content=path.read_text(encoding="utf-8"),
             format=IngestDocumentFormat("markdown" if path.suffix in (".md", ".mdx") else "html"),
@@ -166,14 +175,22 @@ def taxonomy_generate(paths, audience, out, model, base_url, batch_size, dry_run
     tag_nodes = client.graph_store.get_tag_nodes(graph_name)
     inventory = collect_inventory([t.title for t in tag_nodes])
 
-    click.echo(f"Collected {len(inventory.tags)} raw tags from {len(paths)} document(s).")
+    click.echo(f"Collected {len(inventory.tags)} raw tags from {len(documents)} document(s).")
     if dry_run:
         click.echo(build_prompt(inventory.tags[:batch_size], inventory.snippets))
         return
 
-    transport = AdaptionTransport(
-        base_url=base_url or "https://api.adaptionlabs.ai", model=model
-    )
+    if provider == "openai-compat":
+        from retelldb.wrangling.generator import OpenAICompatTransport
+
+        transport = OpenAICompatTransport(
+            base_url=base_url or "https://api.featherless.ai/v1",
+            model=model or "Qwen/Qwen2.5-72B-Instruct",
+        )
+    else:
+        transport = AdaptionTransport(
+            base_url=base_url or "https://api.adaptionlabs.ai", model=model
+        )
     try:
         generated, report = generate_taxonomy(
             inventory, transport, batch_size=batch_size
@@ -187,6 +204,9 @@ def taxonomy_generate(paths, audience, out, model, base_url, batch_size, dry_run
     uncovered = report.get("uncovered_raw_tags") or []
     if uncovered:
         click.echo(f"Uncovered raw tags ({len(uncovered)}): {', '.join(uncovered[:20])}")
+    dangling = report.get("dangling_references") or []
+    if dangling:
+        click.echo(f"References with no canonical tag in this file: {', '.join(dangling)}")
     collisions = report.get("alias_collisions") or []
     if collisions:
         click.echo(f"Alias collisions to review: {', '.join(collisions)}")
@@ -212,3 +232,6 @@ def taxonomy_validate(path):
     click.echo(f"{path}: {len(canonicals)} canonical tags, {alias_count} aliases")
     if dangling:
         click.echo(f"References with no canonical tag: {', '.join(dangling)}")
+
+if __name__ == "__main__":
+    main()

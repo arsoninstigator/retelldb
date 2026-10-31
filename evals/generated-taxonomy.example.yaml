@@ -1,0 +1,135 @@
+tags:
+- name: '401'
+  aliases: []
+  parents:
+  - error
+- name: api
+  aliases: []
+- name: architecture
+  aliases: []
+- name: auth
+  aliases:
+  - alias: authentication
+    confidence: 0.95
+- name: bash
+  aliases: []
+  parents:
+  - scripting
+- name: client
+  aliases: []
+- name: common
+  aliases: []
+- name: debugging
+  aliases: []
+- name: document
+  aliases: []
+  parents:
+  - documentation
+- name: entity
+  aliases: []
+- name: error
+  aliases:
+  - alias: errors
+    confidence: 0.99
+  - alias: unauthorized
+    confidence: 0.85
+  - alias: unprocessable
+    confidence: 0.85
+- name: example
+  aliases: []
+- name: exceeded
+  aliases: []
+  parents:
+  - error
+- name: found
+  aliases: []
+  parents:
+  - error
+- name: handling
+  aliases: []
+- name: http
+  aliases: []
+- name: ingest
+  aliases:
+  - alias: ingesting
+    confidence: 0.99
+- name: initializing
+  aliases: []
+- name: installation
+  aliases: []
+- name: internal
+  aliases: []
+  parents:
+  - error
+- name: json
+  aliases: []
+- name: key
+  aliases: []
+  parents:
+  - auth
+- name: limit
+  aliases: []
+  parents:
+  - error
+- name: markdown
+  aliases: []
+  parents:
+  - documentation
+- name: not
+  aliases: []
+  parents:
+  - error
+- name: post
+  aliases: []
+  parents:
+  - http
+- name: python
+  aliases: []
+  parents:
+  - scripting
+- name: querying
+  aliases: []
+- name: quickstart
+  aliases: []
+  parents:
+  - documentation
+- name: rate
+  aliases: []
+  parents:
+  - error
+- name: rate limit
+  aliases: []
+  parents:
+  - error
+- name: refresh
+  aliases: []
+  parents:
+  - auth
+- name: revoked
+  aliases: []
+  parents:
+  - auth
+- name: sdk
+  aliases: []
+  parents:
+  - client
+- name: security
+  aliases: []
+- name: server
+  aliases: []
+- name: session
+  aliases: []
+  parents:
+  - auth
+- name: setup
+  aliases: []
+  parents:
+  - installation
+- name: token
+  aliases:
+  - alias: tokens
+    confidence: 0.99
+  parents:
+  - auth
+- name: workflow
+  aliases: []
