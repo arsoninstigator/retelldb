@@ -236,8 +236,10 @@ flowchart TD
 then gates on the eval hit rate. jobs run on **tenki runners** (`tenki-standard-small-2c-4g`),
 which are a drop-in replacement for github-hosted runners: only the `runs-on` value differs.
 
-one-time setup, done once per org rather than per push: install the tenki github app on the
-`retelldb` org and grant it this repository (tenki dashboard -> runners -> github connection).
+one-time setup, done once per owner rather than per push: install the tenki github app for the
+account that hosts this repository and grant it the repo (tenki dashboard -> runners -> github
+connection). the repository currently lives at `arsoninstigator/retelldb` and moves back to the
+`retelldb` org later, so no workflow value is org specific.
 until that is done, jobs sit in the queue waiting for a runner with the tenki label instead of
 failing.
 

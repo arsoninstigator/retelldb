@@ -18,7 +18,7 @@ jobs:
   test:
     # tenki runners, a drop-in replacement for GitHub-hosted runners:
     # https://tenki.cloud/docs/runners/quickstart
-    # the tenki github app must be installed on the retelldb org, otherwise the job
+    # the tenki github app must be installed for this repo's owner, otherwise the job
     # sits in the queue waiting for a runner with this label
     runs-on: tenki-standard-small-2c-4g
     timeout-minutes: 15
