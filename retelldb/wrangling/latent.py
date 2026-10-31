@@ -20,6 +20,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 from pydantic import BaseModel, Field
 
 from retelldb.wrangling.confidence import tier_for
+from retelldb.wrangling.relations import types_compatible
 from retelldb.wrangling.taxonomy import CanonicalTag, TagTaxonomy, normalize_tag
 
 #: below the "uncertain" tier a similarity is not a proposal, it is noise
@@ -67,6 +68,7 @@ class LatentReport(BaseModel):
     proposals: List[AssociationProposal] = Field(default_factory=list)
     skipped_already_related: int = 0
     blocked_by_exclusion: int = 0
+    skipped_cross_type: int = 0
     below_threshold: int = 0
     # where this corpus actually sits, so a threshold is chosen with evidence
     pairs_compared: int = 0
@@ -134,6 +136,7 @@ def propose_associations(
     - an association already configured is skipped, so a reviewed weight is never
       overwritten by an embedding
     - an exclusion pair is never proposed, in either direction
+    - a cross-type pair is never proposed, at any similarity (AO3 relations are same-type)
     - below the threshold is silence, and the count of silences is reported
     - each tag keeps its strongest `max_per_tag` neighbours
     """
@@ -164,6 +167,7 @@ def propose_associations(
     considered: List[Tuple[float, str, str]] = []
     skipped_related = 0
     blocked = 0
+    cross_type = 0
     below = 0
 
     for i, source in enumerate(names):
@@ -179,6 +183,9 @@ def propose_associations(
                 continue
             if target in exclusions or source in _excludes(other):
                 blocked += 1
+                continue
+            if not types_compatible(tag, other):
+                cross_type += 1
                 continue
             similarity = cosine_similarity(vectors[source], vectors[target])
             all_similarities.append(similarity)
@@ -219,6 +226,7 @@ def propose_associations(
         proposals=proposals,
         skipped_already_related=skipped_related,
         blocked_by_exclusion=blocked,
+        skipped_cross_type=cross_type,
         below_threshold=below,
         pairs_compared=len(all_similarities),
         similarity_median=round(median, 4),
@@ -251,8 +259,14 @@ def apply_proposals(taxonomy: TagTaxonomy, report: LatentReport) -> TagTaxonomy:
     return taxonomy
 
 
-def proposals_to_yaml(report: LatentReport) -> str:
-    """Serialize proposals for review, provenance first."""
+def proposals_to_yaml(report: LatentReport, synonym_candidates=None) -> str:
+    """
+    Serialize proposals for review, provenance first.
+
+    `synonym_candidates` ride along in their own section: a high cosine is a prompt for a
+    human, and putting it in the same list as associations would invite the two to be applied
+    together. They cannot be applied at all.
+    """
     import yaml
 
     payload = {
@@ -273,6 +287,7 @@ def proposals_to_yaml(report: LatentReport) -> str:
             "similarity_p90": report.similarity_p90,
             "skipped_already_related": report.skipped_already_related,
             "blocked_by_exclusion": report.blocked_by_exclusion,
+            "skipped_cross_type": report.skipped_cross_type,
             "below_threshold": report.below_threshold,
         },
         "proposals": [
@@ -286,6 +301,22 @@ def proposals_to_yaml(report: LatentReport) -> str:
             for proposal in report.proposals
         ],
     }
+    if synonym_candidates:
+        payload["synonym_candidates"] = {
+            "note": (
+                "latent proximity, not a synonym. AO3 merges by hand because wording is not "
+                "concept; write an alias rule to accept one."
+            ),
+            "candidates": [
+                {
+                    "source": candidate.source,
+                    "target": candidate.target,
+                    "similarity": candidate.similarity,
+                    "tag_type": candidate.tag_type,
+                }
+                for candidate in synonym_candidates
+            ],
+        }
     return yaml.safe_dump(payload, sort_keys=False, allow_unicode=True)
 
 

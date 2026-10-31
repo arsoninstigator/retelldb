@@ -1,5 +1,29 @@
 # changelog
 
+## 0.2.6
+
+### added
+
+- the semantic/latent mapping, derived from otwarchive's actual validations: semantic
+  similarity is the only thing that may create a synonym, latent similarity creates
+  associations and at 0.9 and above flags a synonym candidate a human has to accept. stated
+  once in `relations.py` (`explain_mapping`) and printed by `taxonomy validate`.
+- `tag_type` on a canonical tag, so AO3's same-class rule applies. cross-type pairs get no
+  relation at any similarity, and latent passes report how many they refused.
+- `check_relations`: synonym/association/exclusion rule checks, each violation named well
+  enough to fix without reading the source.
+- `repair_relations`: mirrors one-sided associations (stronger claim wins), drops associations
+  pointing at no canonical tag, and removes a tag aliased to itself. all counted in the
+  generation report.
+- `--associate` proposals now carry a `synonym_candidates` section, separate from associations,
+  and nothing in it can be applied: a candidate is a prompt for a human, not an edge.
+
+### verified
+
+- chained on the eval corpus: 7 one-sided associations mirrored, 4 self-aliases dropped, and
+  the only remaining violations are one real merge decision (`installation`/`setup` alias each
+  other), which validate reports instead of guessing at.
+
 ## 0.2.5
 
 ### added

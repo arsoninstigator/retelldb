@@ -381,8 +381,13 @@ def generate_taxonomy(
         ambiguities.extend(batch_ambiguous)
 
     taxonomy = TagTaxonomy(tags=sorted(merged.values(), key=lambda t: t.name))
+    # AO3 keeps associations symmetric and canonical-only, so repair before anyone reads it
+    from retelldb.wrangling.relations import repair_relations
+
+    repaired = repair_relations(taxonomy)
     report = reconcile(taxonomy, inventory)
     report["ambiguous"] = ambiguities
+    report.update(repaired)
     return taxonomy, report
 
 
@@ -394,6 +399,7 @@ def taxonomy_to_yaml(taxonomy: TagTaxonomy) -> str:
         "tags": [
             {
                 "name": tag.name,
+                **({"tag_type": tag.tag_type} if tag.tag_type else {}),
                 "aliases": [
                     {"alias": rule.alias, "confidence": round(rule.confidence, 3)}
                     for rule in tag.aliases

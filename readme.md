@@ -113,6 +113,41 @@ closes a request at 60s and that is what actually finishes in time on this corpu
 batching follows from the same limit: 12 tags per request (16 took 57s, 20 timed out), so
 `--batch-size` defaults to 12 and `RETELLDB_TAXONOMY_BATCH` style overrides are not needed.
 
+### semantic vs latent: what AO3 actually does
+
+the reference implementation is otwarchive (`otwcode/otwarchive`), and the most useful thing
+about reading it is what it does **not** have: no embeddings, no fuzzy matching, no automatic
+wrangling. `app/models/tag.rb` only carries three explicit links, all human-authored:
+
+| AO3 | means | encoded as | rules it enforces |
+| --- | --- | --- | --- |
+| synonym | same concept, different wording | `merger_id` self-FK on a noncanonical tag | merger must be canonical (`Tag#filter` returns it only then), same class, not itself |
+| meta | "this tag is a superset of that one" | `MetaTagging(meta_tag, sub_tag)` | both canonical, same class, no self, no grandparent cycle |
+| unwrangleable | do not wrangle this | `unwrangleable` flag | cannot be set on a canonical or a synonymized tag |
+
+so the mapping retelldb uses, stated once in `retelldb/wrangling/relations.py` and printed by
+`retelldb taxonomy validate`:
+
+- **semantic similarity** (same words, a configured alias, a human or the generator naming the
+  canonical) is the only thing that may create a **synonym**. it is the only relation that
+  means "same concept".
+- **latent similarity** may create an **association** with its cosine as the strength, and at
+  0.9 and above it flags a **synonym candidate** for a human. it can never write the alias,
+  because proximity is evidence about wording, not about identity.
+- **cross-type pairs** get no relation at any similarity, which is AO3's same-class rule and
+  what stops `jane austen` (person) merging into `pride and prejudice` (work) for being close.
+- **below the threshold** is silence.
+
+`tag_type` is now a tag field for exactly that reason, and the generator repairs what models
+get wrong before anyone reads the file: one-sided associations are mirrored (the stronger claim
+wins on disagreement), associations to tags the batch never produced are dropped, and a tag
+aliased to itself is removed. all three are counted in the generation report, because a silent
+repair is a repair nobody audits.
+
+on the eval corpus the last run repaired 7 one-sided associations and 4 self-aliases, and left
+2 `alias_shadows_canonical` violations that are a genuine merge decision (`installation` and
+`setup` alias each other), which is what `taxonomy validate` is for.
+
 ### latent associations, proposed not asserted
 
 memorium's rule is that embeddings are demoted from "the thing that understands the

@@ -125,6 +125,10 @@ def _latent_pass(path, out, model=None, threshold=None, max_per_tag=None, apply=
     build-time only and the runtime never loads it.
     """
     from retelldb.wrangling.generator import taxonomy_to_yaml
+    from retelldb.wrangling.relations import (
+        SYNONYM_CANDIDATE_SIMILARITY,
+        synonym_candidates as find_synonym_candidates,
+    )
     from retelldb.wrangling.latent import (
         DEFAULT_MAX_PER_TAG,
         MIN_SIMILARITY,
@@ -155,7 +159,8 @@ def _latent_pass(path, out, model=None, threshold=None, max_per_tag=None, apply=
     except (LatentError, EmbeddingUnavailable, RuntimeError) as exc:
         raise click.ClickException(str(exc))
 
-    out.write_text(proposals_to_yaml(report), encoding="utf-8")
+    candidates = find_synonym_candidates(taxonomy, report.proposals)
+    out.write_text(proposals_to_yaml(report, candidates), encoding="utf-8")
     click.echo(
         f"Embedded {report.tags_embedded} tags with {report.embedder} "
         f"({report.dimension}-dim, threshold {report.threshold})."
@@ -163,8 +168,14 @@ def _latent_pass(path, out, model=None, threshold=None, max_per_tag=None, apply=
     click.echo(
         f"{len(report.proposals)} proposals, {report.below_threshold} pairs below threshold, "
         f"{report.skipped_already_related} already configured, "
-        f"{report.blocked_by_exclusion} blocked by an exclusion."
+        f"{report.blocked_by_exclusion} blocked by an exclusion, "
+        f"{report.skipped_cross_type} refused as cross-type."
     )
+    if candidates:
+        click.echo(
+            f"{len(candidates)} synonym candidates at or above "
+            f"{SYNONYM_CANDIDATE_SIMILARITY}: evidence for review, never written as aliases."
+        )
     click.echo(
         f"This corpus sits at median {report.similarity_median} and p90 "
         f"{report.similarity_p90} across {report.pairs_compared} pairs."
@@ -282,6 +293,20 @@ def taxonomy_generate(paths, audience, out, provider, model, base_url, batch_siz
     ambiguous = report.get("ambiguous") or []
     if ambiguous:
         click.echo(f"Ambiguous tags left unresolved: {len(ambiguous)}")
+    if report.get("symmetric_added"):
+        click.echo(
+            f"Associations repaired to symmetric: {report['symmetric_added']} edges mirrored"
+        )
+    if report.get("dropped_self_aliases"):
+        click.echo(
+            f"Self-as-alias rules dropped: {report['dropped_self_aliases']} (a tag cannot "
+            "be its own synonym)"
+        )
+    if report.get("dropped_relations"):
+        click.echo(
+            f"Associations dropped for pointing at no canonical tag: "
+            f"{report['dropped_relations']}"
+        )
     click.echo("Review the file, then set RETELLDB_TAXONOMY_PATH to use it.")
     if associate:
         proposals_path = out.with_name(f"{out.stem}.associations.yaml")
@@ -328,6 +353,22 @@ def taxonomy_validate(path):
     click.echo(f"{path}: {len(canonicals)} canonical tags, {alias_count} aliases")
     if dangling:
         click.echo(f"References with no canonical tag: {', '.join(dangling)}")
+
+    from collections import Counter
+
+    from retelldb.wrangling.relations import check_relations, explain_mapping
+
+    violations = check_relations(loaded)
+    if violations:
+        counts = Counter(v.kind for v in violations)
+        summary = ", ".join(f"{kind} x{count}" for kind, count in sorted(counts.items()))
+        click.echo(f"Relation rule violations ({len(violations)}): {summary}")
+        for violation in violations[:10]:
+            click.echo(f"  {violation.kind}: {violation.subject} — {violation.detail}")
+    else:
+        click.echo("Relation rules: clean (synonyms one hop to canonical, associations symmetric)")
+    for line in explain_mapping():
+        click.echo(f"  {line}")
 
 if __name__ == "__main__":
     main()

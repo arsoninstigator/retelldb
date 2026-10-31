@@ -49,6 +49,9 @@ class CanonicalTag(BaseModel):
     """A canonical tag with its aliases, hierarchy and associations."""
 
     name: str
+    # AO3 tag class (fandom, character, relationship, freeform, ...). relations are same-type
+    # only, so this is what stops a person tag from merging into a work tag.
+    tag_type: Optional[str] = None
     aliases: List[AliasRule] = Field(default_factory=list)
     # parent tags, weight 1.0: a child tag implies its parent (python -> programming)
     parents: List[str] = Field(default_factory=list)
@@ -128,6 +131,7 @@ class TagTaxonomy(BaseModel):
                     aliases=aliases,
                     parents=[normalize_tag(p) for p in entry.get("parents", []) or []],
                     related=related,
+                    tag_type=(entry.get("tag_type") or None),
                     excludes=[
                         normalize_tag(x) for x in entry.get("excludes", []) or []
                     ],

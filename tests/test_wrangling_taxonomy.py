@@ -140,9 +140,12 @@ def test_generate_taxonomy_reports_uncovered_and_dangling():
         "tags": [{"name": "programming", "aliases": ["dev"], "related": {"ghost": 0.5}}],
         "ambiguous": [{"raw": "auth", "candidates": ["authentication", "billing"]}],
     }
-    _, report = generate_taxonomy(inventory, FakeTransport(payload))
+    taxonomy, report = generate_taxonomy(inventory, FakeTransport(payload))
     assert report["uncovered_raw_tags"] == ["orphan"]
-    assert report["dangling_references"] == ["ghost"]
+    # an association to a tag the batch never produced is dropped, not left dangling
+    assert report["dangling_references"] == []
+    assert report["dropped_relations"] == 1
+    assert all(not tag.related for tag in taxonomy.tags)
     assert report["ambiguous"][0]["raw"] == "auth"
 
 
