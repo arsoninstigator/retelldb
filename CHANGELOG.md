@@ -1,5 +1,22 @@
 # changelog
 
+## 0.2.8
+
+persona memory lands in the standalone package, so prixie and clawtel can install it
+pinned instead of carrying their own forks.
+
+- `NodeType` gains the memorium memory types (fact, preference, relationship, event,
+  skill, entity, profile); the documentation types stay, one graph shape serves both
+- `SHARED_NAMESPACE`, `normalize_namespace`, `GraphNode.namespace`, and
+  `StorageConfig.graph_for()` so a persona's memory is a sandbox (`memory_<persona>`,
+  `memory_shared`)
+- ported: `models/persona.py` (lingvist / lexica / lingvica), `models/connections.py`
+  (identity anchors), `persona_store.py` (profile as a node in the persona's own graph),
+  `routing/persona.py`, `routing/scope.py` (platform carry rules, fail closed)
+- `QueryRequest` takes `persona_id`, `platform` and `connection_id`; the engine applies
+  platform scope and reports `dropped` with reasons
+- `__version__` now tracks the installed package metadata instead of drifting
+
 ## 0.2.7
 
 - `retelldb taxonomy bins <taxonomy> <paths>` groups unwrangled tags under the canonical tags

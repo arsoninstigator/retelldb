@@ -30,6 +30,12 @@ class QueryRequest(BaseModel):
     # perspective: which persona this query runs as. None means no declared perspective,
     # in which case persona-scoped content stays out of reach (fail-closed).
     persona: Optional[str] = None
+    # prixie and clawtel call this persona_id; treat the two names as one field
+    persona_id: Optional[str] = None
+    # platform scope: which surface this query runs on, and whose session is in front of
+    # it. declaring a platform turns on carry-over rules; leaving it out changes nothing.
+    platform: Optional[str] = None
+    connection_id: Optional[str] = None
     allow_shared: bool = True
     # report what perspective hid and where the content came from
     include_blocked: bool = True
@@ -53,6 +59,8 @@ class SubGraphResult(BaseModel):
     retrieval_path: QueryStrategy
     nodes: List[ScoredNode] = Field(default_factory=list)
     edges: List[GraphEdge] = Field(default_factory=list)
+    # what scope hid, and why, so a thin answer is explainable
+    dropped: List[Dict[str, str]] = Field(default_factory=list)
     traversal_chains: List[List[str]] = Field(default_factory=list)
     confidence_signals: Dict[str, float] = Field(default_factory=dict)
     execution_time_ms: float = 0.0

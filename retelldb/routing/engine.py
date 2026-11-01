@@ -211,6 +211,23 @@ class RetrievalEngine:
 
         # 7. Assemble edges, paths and citations for the returned subgraph
         final_edges: List[GraphEdge] = []
+        # platform scope: carry over or drop, per persona and per platform. only applies when
+        # the caller declares a platform, so the pre-scope behavior stays the default.
+        dropped_reasons: List[Dict[str, str]] = []
+        declared_persona = request.persona or request.persona_id
+        if request.platform and top_nodes:
+            from retelldb.models.schema import SHARED_NAMESPACE
+            from retelldb.routing.scope import MemoryScope, filter_nodes
+
+            session_scope = MemoryScope(
+                persona_id=declared_persona,
+                platform=request.platform,
+                connection_id=request.connection_id,
+            )
+            top_nodes, dropped_reasons = filter_nodes(
+                top_nodes, session_scope, session_scope, shared_ids={SHARED_NAMESPACE}
+            )
+
         if request.include_edges and top_nodes:
             top_ids = [sn.node.id for sn in top_nodes]
             subgraph_edges = self.graph_store.get_subgraph_between(target_graph, top_ids)
@@ -251,6 +268,7 @@ class RetrievalEngine:
             target_graph=target_graph,
             retrieval_path=strategy,
             nodes=top_nodes,
+            dropped=dropped_reasons,
             edges=final_edges,
             traversal_chains=self._build_traversal_chains(
                 [sn.node.id for sn in top_nodes], final_edges

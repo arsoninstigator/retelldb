@@ -364,3 +364,34 @@ class TestBinsCommand:
         assert "authentication <-" in result.output
         # the billing document carried a tag the ontology already covers, so it adds nothing
         assert "billing <-" not in result.output
+
+
+class TestPersonaMemory:
+    """The persona layer prixie and clawtel read, now part of the standalone package."""
+
+    def test_a_voice_profile_round_trips_through_its_own_memory_graph(self):
+        from retelldb import RetellDB
+        from retelldb.models.persona import PersonaProfile
+        from retelldb.persona_store import load_profile, save_profile
+
+        client = RetellDB(use_memory=True)
+        profile = PersonaProfile(persona_id="hackathon", display_name="Hackathon You")
+
+        saved = save_profile(client.graph_store, client.config, profile)
+        loaded = load_profile(client.graph_store, client.config, "hackathon")
+
+        assert saved.success is True
+        assert saved.graph == "memory_hackathon"
+        assert loaded is not None and loaded.display_name == "Hackathon You"
+        # another persona's graph knows nothing about this one
+        assert load_profile(client.graph_store, client.config, "founder") is None
+
+    def test_the_package_version_tracks_pyproject(self):
+        import pathlib
+        import re
+
+        import retelldb
+
+        pyproject = pathlib.Path(__file__).resolve().parents[1] / "pyproject.toml"
+        declared = re.search(r'^version = "([^"]+)"', pyproject.read_text(), re.M).group(1)
+        assert retelldb.__version__ == declared

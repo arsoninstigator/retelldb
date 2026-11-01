@@ -24,6 +24,19 @@ class StorageConfig(BaseModel):
     dev_graph_name: str = Field(default_factory=lambda: os.getenv("DEV_GRAPH_NAME", "dev_graph"))
     user_graph_name: str = Field(default_factory=lambda: os.getenv("USER_GRAPH_NAME", "user_graph"))
 
+    # persona memory graphs: one graph per namespace, so a persona's head is a sandbox
+    namespace_prefix: str = Field(default_factory=lambda: os.getenv("MEMORY_GRAPH_PREFIX", "memory"))
+    shared_namespace: str = Field(default_factory=lambda: os.getenv("SHARED_NAMESPACE_NAME", "shared"))
+
+    def graph_for(self, namespace: str) -> str:
+        """Graph name for a memory namespace ('shared' -> the shared graph, else per-persona)."""
+        from retelldb.models.schema import SHARED_NAMESPACE, normalize_namespace
+
+        token = normalize_namespace(namespace)
+        if token == SHARED_NAMESPACE:
+            return f"{self.namespace_prefix}_{self.shared_namespace}"
+        return f"{self.namespace_prefix}_{token}"
+
 
 class InferenceConfig(BaseModel):
     """LiteLLM and model split configuration."""

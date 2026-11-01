@@ -12,6 +12,17 @@ import uuid
 # Namespace UUID for deterministic UUIDv5 generation across documents and nodes
 RETELL_NAMESPACE = uuid.UUID("a2839210-61b4-4b57-a3d8-e160e1d89b33")
 
+# the namespace that holds memory shared across all personas
+SHARED_NAMESPACE = "shared"
+
+
+def normalize_namespace(namespace: Optional[str]) -> str:
+    """Sanitize a persona id into a safe graph namespace token."""
+    if not namespace:
+        return SHARED_NAMESPACE
+    token = "".join(c if c.isalnum() or c in ("_", "-") else "_" for c in namespace.strip().lower())
+    return token or SHARED_NAMESPACE
+
 
 def generate_node_id(
     audience: str,
@@ -44,6 +55,15 @@ class NodeType(str, Enum):
     GUIDE = "guide"
     ERROR = "error"
     TAG = "tag"
+    # persona memory nodes (the memorium model). docs and memory share one graph shape,
+    # so a retrieval engine and its provenance work the same for both.
+    FACT = "fact"                 # something the persona knows to be true
+    PREFERENCE = "preference"     # how the persona likes things done
+    RELATIONSHIP = "relationship" # who the persona knows and how
+    EVENT = "event"               # something that happened, with a when
+    SKILL = "skill"               # something the persona can do
+    ENTITY = "entity"             # a named thing other memories reference
+    PROFILE = "profile"           # the persona's own voice profile (one per persona graph)
 
 
 class EdgeType(str, Enum):
@@ -111,6 +131,9 @@ class GraphNode(BaseModel):
     type: NodeType
     content: str = ""
     audience: AudienceType = AudienceType.DEVELOPER
+    # which memory namespace this node belongs to ("shared" or a persona id). does not
+    # change docs behavior; persona memory uses it to keep one head per graph.
+    namespace: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
     source_uri: Optional[str] = None
     locator: Optional[str] = None
