@@ -33,7 +33,7 @@ create a synonym. Latent similarity may create an association and, at the top of
 *flagged candidate* for a human to turn into a synonym. It may never create the synonym.
 """
 
-from typing import Dict, List, Optional
+from typing import Sequence, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -54,6 +54,10 @@ class RelationViolationKind(str):
     SELF_ASSOCIATION = "self_association"
     ASSOCIATION_NOT_SYMMETRIC = "association_not_symmetric"
     CROSS_TYPE_ASSOCIATION = "cross_type_association"
+    PARENT_TARGET_MISSING = "parent_target_missing"
+    CROSS_TYPE_PARENT = "cross_type_parent"
+    SELF_PARENT = "self_parent"
+    PARENT_CYCLE = "parent_cycle"
     EXCLUSION_TARGET_MISSING = "exclusion_target_missing"
     EXCLUDED_AND_RELATED = "excluded_and_related"
 
@@ -192,7 +196,69 @@ def check_relations(taxonomy: TagTaxonomy) -> List[RelationViolation]:
                     )
                 )
 
+    # hierarchy rules, straight from MetaTagging's validations: both ends canonical, same
+    # class, never itself, and "a metatag can't be its own grandparent" (no cycles).
+    for tag in taxonomy.tags:
+        name = tag.normalized_name()
+        for parent in tag.parents:
+            key = normalize_tag(parent)
+            target = by_name.get(key)
+            if target is None:
+                violations.append(
+                    RelationViolation(
+                        kind=RelationViolationKind.PARENT_TARGET_MISSING,
+                        subject=name,
+                        detail=f"parent '{key}' is not a canonical tag, so it is not a meta tag",
+                    )
+                )
+            elif key == name:
+                violations.append(
+                    RelationViolation(
+                        kind=RelationViolationKind.SELF_PARENT,
+                        subject=name,
+                        detail="a tag cannot be its own meta tag",
+                    )
+                )
+            elif not types_compatible(tag, target):
+                violations.append(
+                    RelationViolation(
+                        kind=RelationViolationKind.CROSS_TYPE_PARENT,
+                        subject=name,
+                        detail=(
+                            f"meta tag '{key}' is a {target.tag_type} while the sub tag is a "
+                            f"{tag.tag_type}; meta tags must share the sub tag's type"
+                        ),
+                    )
+                )
+
+    for tag in taxonomy.tags:
+        if _reaches_itself(tag.normalized_name(), by_name):
+            violations.append(
+                RelationViolation(
+                    kind=RelationViolationKind.PARENT_CYCLE,
+                    subject=tag.normalized_name(),
+                    detail="following parents from this tag leads back to it (a metatag cannot be its own grandparent)",
+                )
+            )
+
     return violations
+
+
+def _reaches_itself(start: str, by_name: Dict[str, CanonicalTag]) -> bool:
+    """Walk the parent chain; True when it loops back to where it started."""
+    frontier = [normalize_tag(p) for p in (by_name[start].parents if start in by_name else [])]
+    seen: List[str] = []
+    while frontier:
+        current = frontier.pop()
+        if current == start:
+            return True
+        if current in seen:
+            continue
+        seen.append(current)
+        node = by_name.get(current)
+        if node is not None:
+            frontier.extend(normalize_tag(p) for p in node.parents)
+    return False
 
 
 def repair_relations(taxonomy: TagTaxonomy) -> Dict[str, int]:
@@ -326,3 +392,52 @@ def explain_mapping() -> List[str]:
         "latent below threshold: silence",
         "cross-type pairs: no relation at any similarity (AO3 types are load bearing)",
     ]
+
+
+class ObservedDocument(BaseModel):
+    """One document's tags, split by whether the wrangler could place them."""
+
+    canonical_tags: List[str] = Field(default_factory=list)
+    unwrangled_tags: List[str] = Field(default_factory=list)
+
+
+class UnwrangledBuckets(BaseModel):
+    """Unwrangled tags grouped by the canonical tag they were seen with."""
+
+    buckets: Dict[str, List[str]] = Field(default_factory=dict)
+    unattributed: List[str] = Field(default_factory=list)
+    documents: int = 0
+
+
+def unwrangled_buckets(documents: Sequence[ObservedDocument]) -> UnwrangledBuckets:
+    """
+    Attribute unwrangled tags to the canonicals they were observed with.
+
+    otwarchive's spec says it plainly: "Synning a fandom to a canonical fandom moves its
+    unwrangled tags to the canonical's unwrangled bins; de-synning takes them out"
+    (features/tags_and_wrangling/tag_wrangling_more.feature). The mechanism is
+    co-occurrence, not string similarity: an unwrangled tag rides along with the canonical
+    tags on the same document, so that is how it gets a home to be reviewed in.
+
+    A tag observed with no canonical at all stays unattributed, which is the honest answer:
+    there is nothing to review it against yet.
+    """
+    buckets: Dict[str, Set[str]] = {}
+    unattributed: Set[str] = set()
+
+    for document in documents:
+        anchors = sorted({normalize_tag(tag) for tag in document.canonical_tags if tag})
+        loose = sorted({str(tag) for tag in document.unwrangled_tags if str(tag).strip()})
+        if not loose:
+            continue
+        if not anchors:
+            unattributed.update(loose)
+            continue
+        for anchor in anchors:
+            buckets.setdefault(anchor, set()).update(loose)
+
+    return UnwrangledBuckets(
+        buckets={name: sorted(tags) for name, tags in sorted(buckets.items())},
+        unattributed=sorted(unattributed),
+        documents=len(documents),
+    )

@@ -1,6 +1,19 @@
 # changelog
 
-## 0.2.6
+## 0.2.7
+
+- `retelldb taxonomy bins <taxonomy> <paths>` groups unwrangled tags under the canonical tags
+they were observed with, mirroring otwarchive's unwrangled bins. co-occurrence only; a tag
+with no canonical nearby is reported as unattributed.
+- `normalize_tag` folds diacritics, so "Amélie" and "Amelie" are one tag, per
+tag_wrangling_special.feature. punctuation stays significant, so "Teal'c" and "Tealc" differ.
+- hierarchy is validated like MetaTagging: parent must be canonical, same type, not itself,
+and no cycles. violations are reported by `taxonomy validate`.
+- `IngestResponse` now reports `resolved_tags`, `unresolved_tags` and `observed_tags`,
+classified against the configured ontology rather than against tag nodes the same ingest
+created.
+
+0.2.6
 
 ### added
 

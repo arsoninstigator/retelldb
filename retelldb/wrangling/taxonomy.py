@@ -14,6 +14,7 @@ import json
 import logging
 import pathlib
 import re
+import unicodedata
 from enum import Enum
 from typing import Dict, List, Optional, Union
 
@@ -25,8 +26,17 @@ _SEPARATOR_RE = re.compile(r"[\s_\-/]+")
 
 
 def normalize_tag(raw: str) -> str:
-    """Normalize a tag for comparison only. The raw form is always preserved."""
-    return _SEPARATOR_RE.sub(" ", str(raw).strip().lower()).strip()
+    """
+    Normalize a tag for comparison only. The raw form is always preserved.
+
+    Diacritics fold, because AO3 treats "Amélie" and "Amelie" as the same tag
+    (features/tags_and_wrangling/tag_wrangling_special.feature). Case folds in the same
+    way, for the same reason.
+    """
+    text = str(raw).strip().lower()
+    decomposed = unicodedata.normalize("NFKD", text)
+    text = "".join(char for char in decomposed if not unicodedata.combining(char))
+    return _SEPARATOR_RE.sub(" ", text).strip()
 
 
 class ResolutionRule(str, Enum):

@@ -31,6 +31,7 @@ from retelldb.wrangling.taxonomy import (
     ResolutionRule,
     TagResolution,
     TagTaxonomy,
+    normalize_tag,
     taxonomy_from_config,
 )
 
@@ -142,6 +143,8 @@ class IngestionPipeline:
         total_edges_created = 0
         total_tags_created = 0
         total_aliases = 0
+        # the ontology as configured, so a tag this same call created is not counted as wrangled
+        configured_canonicals = {normalize_tag(name) for name in self.taxonomy.canonical_names()}
         all_resolutions: List[TagResolution] = []
         all_ambiguous: List[str] = []
         target_graphs_written: List[str] = []
@@ -237,6 +240,21 @@ class IngestionPipeline:
             execution_time_ms=round(elapsed_ms, 2),
             aliases_created=total_aliases,
             ambiguous_tags=sorted(set(all_ambiguous)),
+            resolved_tags=sorted(
+                {
+                    r.canonical
+                    for r in all_resolutions
+                    if r.canonical and normalize_tag(r.canonical) in configured_canonicals
+                }
+            ),
+            unresolved_tags=sorted(
+                {
+                    r.raw
+                    for r in all_resolutions
+                    if normalize_tag(r.raw) not in configured_canonicals
+                }
+            ),
+            observed_tags=sorted({r.raw for r in all_resolutions}),
         )
 
     def _reconcile_source_upsert(

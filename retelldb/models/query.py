@@ -109,6 +109,12 @@ class IngestResponse(BaseModel):
     aliases_created: int = 0
     # raw tags that matched more than one canonical tag and were left alone
     ambiguous_tags: List[str] = Field(default_factory=list)
+    # what the wrangler decided for this document: the canonical tags it landed on, and the
+    # raw tags it could not place. both are needed to attribute unwrangled tags to a bucket.
+    resolved_tags: List[str] = Field(default_factory=list)
+    unresolved_tags: List[str] = Field(default_factory=list)
+    # every raw tag this document carried, so a later taxonomy can be applied to it
+    observed_tags: List[str] = Field(default_factory=list)
 
 
 class GraphStatusResponse(BaseModel):

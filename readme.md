@@ -113,6 +113,34 @@ closes a request at 60s and that is what actually finishes in time on this corpu
 batching follows from the same limit: 12 tags per request (16 took 57s, 20 timed out), so
 `--batch-size` defaults to 12 and `RETELLDB_TAXONOMY_BATCH` style overrides are not needed.
 
+### unwrangled bins, the review queue
+
+an ontology is only useful if you can see what it fails to cover. `taxonomy bins` ingests
+documents against an existing ontology and groups the tags it could not place under the
+canonical tags they were observed with:
+
+```bash
+retelldb taxonomy bins taxonomy.yaml docs/
+# taxonomy.yaml: 10 bucket(s) across 6 document(s)
+#   authentication <- auth, key, post, refresh, revoked, session, token, tokens
+#   (no canonical nearby) <- billing, invoice, payment, pricing, subscription
+```
+
+this is otwarchive's model, not an invention: "Synning a fandom to a canonical fandom moves
+its unwrangled tags to the canonical's unwrangled bins; de-synning takes them out"
+(`features/tags_and_wrangling/tag_wrangling_more.feature`). the grouping signal is
+co-occurrence on the same document, never string similarity, and a tag that appears with no
+canonical at all stays unattributed rather than being guessed into a bin.
+
+the same features settled two identity questions that string matching gets wrong: accent-only
+differences are the same tag ("Amélie is considered the same as Amelie by the database" in
+`tag_wrangling_special.feature`), while punctuation is not, so `Teal'c` and `Tealc` stay
+distinct. `normalize_tag` folds diacritics and case for comparison and always preserves the
+raw form in resolutions.
+
+hierarchy follows `MetaTagging`: both ends canonical, same type, never itself, and no cycles,
+so "a metatag can't be its own grandparent" is checked rather than assumed.
+
 ### semantic vs latent: what AO3 actually does
 
 the reference implementation is otwarchive (`otwcode/otwarchive`), and the most useful thing

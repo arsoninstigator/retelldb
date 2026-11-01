@@ -11,6 +11,8 @@ import pytest
 
 from retelldb.wrangling.latent import propose_associations
 from retelldb.wrangling.relations import (
+    ObservedDocument,
+    unwrangled_buckets,
     SYNONYM_CANDIDATE_SIMILARITY,
     RelationViolationKind,
     check_relations,
@@ -278,3 +280,87 @@ class TestRepair:
         assert [rule.alias for rule in taxonomy.tags[0].aliases] == ["http requests"]
         assert counts["dropped_self_aliases"] == 1
         assert check_relations(taxonomy) == []
+
+
+class TestUnwrangledBuckets:
+    """
+    otwarchive: synning a tag to a canonical moves its unwrangled neighbours into the
+    canonical's bins, de-synning takes them out. The grouping signal is co-occurrence.
+    """
+
+    def test_tags_are_grouped_under_the_canonicals_they_were_seen_with(self):
+        report = unwrangled_buckets(
+            [
+                ObservedDocument(
+                    canonical_tags=["authentication"], unwrangled_tags=["auth flow", "sso"]
+                ),
+                ObservedDocument(canonical_tags=["billing"], unwrangled_tags=["invoice"]),
+            ]
+        )
+
+        assert report.buckets == {
+            "authentication": ["auth flow", "sso"],
+            "billing": ["invoice"],
+        }
+        assert report.unattributed == []
+
+    def test_a_tag_with_nothing_nearby_is_unattributed_not_guessed(self):
+        report = unwrangled_buckets(
+            [ObservedDocument(canonical_tags=[], unwrangled_tags=["stray thought"])]
+        )
+
+        assert report.buckets == {}
+        assert report.unattributed == ["stray thought"]
+
+    def test_the_same_tag_lands_in_every_bucket_it_rides_with(self):
+        report = unwrangled_buckets(
+            [
+                ObservedDocument(
+                    canonical_tags=["api", "sdk"], unwrangled_tags=["rate limit"]
+                )
+            ]
+        )
+
+        assert report.buckets == {"api": ["rate limit"], "sdk": ["rate limit"]}
+
+    def test_documents_without_unwrangled_tags_add_no_buckets(self):
+        report = unwrangled_buckets([ObservedDocument(canonical_tags=["api"])])
+
+        assert report.buckets == {}
+        assert report.unattributed == []
+        assert report.documents == 1
+
+
+class TestBinsCommand:
+    """The bins command is the reviewed-ontology workflow: new docs against an old ontology."""
+
+    def test_tags_the_ontology_does_not_cover_are_grouped_by_their_neighbours(self, tmp_path):
+        from click.testing import CliRunner
+
+        from retelldb.cli import main
+
+        taxonomy_file = tmp_path / "taxonomy.yaml"
+        taxonomy_file.write_text(
+            "tags:\n"
+            "  - name: authentication\n"
+            "    aliases:\n"
+            "      - alias: login\n"
+            "  - name: billing\n",
+            encoding="utf-8",
+        )
+        corpus = tmp_path / "docs"
+        corpus.mkdir()
+        (corpus / "auth.md").write_text(
+            "# Authentication\n\nLogin tokens and session handling.\n", encoding="utf-8"
+        )
+        (corpus / "billing.md").write_text(
+            "# Billing\n\nInvoice reminders and payment plans.\n", encoding="utf-8"
+        )
+
+        result = CliRunner().invoke(main, ["taxonomy", "bins", str(taxonomy_file), str(corpus)])
+
+        assert result.exit_code == 0, result.output
+        assert "bucket(s)" in result.output
+        assert "authentication <-" in result.output
+        # the billing document carried a tag the ontology already covers, so it adds nothing
+        assert "billing <-" not in result.output

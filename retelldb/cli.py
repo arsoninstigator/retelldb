@@ -241,14 +241,16 @@ def taxonomy_generate(paths, audience, out, provider, model, base_url, batch_siz
         else client.config.storage.user_graph_name
     )
 
+    observed_documents = []
     for path in documents:
-        client.ingest(
+        response = client.ingest(
             content=path.read_text(encoding="utf-8"),
             format=IngestDocumentFormat("markdown" if path.suffix in (".md", ".mdx") else "html"),
             audience=AudienceType(audience),
             title=path.stem,
             source_uri=str(path),
         )
+        observed_documents.append(response.observed_tags or [])
 
     tag_nodes = client.graph_store.get_tag_nodes(graph_name)
     inventory = collect_inventory([t.title for t in tag_nodes])
@@ -307,6 +309,10 @@ def taxonomy_generate(paths, audience, out, provider, model, base_url, batch_siz
             f"Associations dropped for pointing at no canonical tag: "
             f"{report['dropped_relations']}"
         )
+    click.echo(
+        f"Run `retelldb taxonomy bins {out} <paths>` to see where tags this ontology does "
+        "not cover would land."
+    )
     click.echo("Review the file, then set RETELLDB_TAXONOMY_PATH to use it.")
     if associate:
         proposals_path = out.with_name(f"{out.stem}.associations.yaml")
@@ -369,6 +375,67 @@ def taxonomy_validate(path):
         click.echo("Relation rules: clean (synonyms one hop to canonical, associations symmetric)")
     for line in explain_mapping():
         click.echo(f"  {line}")
+
+@taxonomy.command("bins")
+@click.argument("path", type=click.Path(exists=True, path_type=Path))
+@click.argument("paths", nargs=-1, type=click.Path(exists=True, path_type=Path))
+@click.option("--audience", "-a", default="developer", type=click.Choice(["developer", "user"]))
+def taxonomy_bins(path, paths, audience):
+    """
+    Show where the tags of these documents would land under an existing ontology.
+
+    Unwrangled tags are grouped by the canonical tags they were observed with, which is how
+    otwarchive's unwrangled bins work: an unresolved tag rides along with the canonical tags
+    on the same work, so that is the bin a wrangler reviews it in.
+    """
+    from retelldb.wrangling.relations import ObservedDocument, unwrangled_buckets
+
+    if not paths:
+        raise click.UsageError("give at least one document path or directory")
+
+    documents = []
+    for given in paths:
+        if given.is_dir():
+            documents.extend(sorted(p for p in given.rglob("*") if p.suffix in (".md", ".mdx")))
+        else:
+            documents.append(given)
+    if not documents:
+        raise click.UsageError("no markdown documents found in the given paths")
+
+    # the ontology under review is the one this command is asked about, passed in directly
+    # because the config reads its path at import time
+    from retelldb import RetellDB
+    from retelldb.models.schema import AudienceType
+    from retelldb.wrangling.taxonomy import TagTaxonomy
+
+    client = RetellDB(use_memory=True, taxonomy=TagTaxonomy.from_file(path))
+    placed = []
+    for document in documents:
+        response = client.ingest(
+            content=document.read_text(encoding="utf-8"),
+            format="markdown",
+            audience=AudienceType(audience),
+            title=document.stem,
+            source_uri=str(document),
+        )
+        placed.append(
+            ObservedDocument(
+                canonical_tags=response.resolved_tags or [],
+                unwrangled_tags=response.unresolved_tags or [],
+            )
+        )
+
+    buckets = unwrangled_buckets(placed)
+    click.echo(
+        f"{path}: {len(buckets.buckets)} bucket(s) across {buckets.documents} document(s)"
+    )
+    for name, tags in buckets.buckets.items():
+        click.echo(f"  {name} <- {', '.join(tags)}")
+    if buckets.unattributed:
+        click.echo(
+            f"  (no canonical nearby) <- {', '.join(buckets.unattributed)}"
+        )
+
 
 if __name__ == "__main__":
     main()
